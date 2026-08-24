@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Model weights — store separately, not in git
+models/pytorch/*.pt
+models/pytorch/*.pth
+models/onnx/*.onnx
+models/tensorrt/*.engine
+models/tensorrt/*.trt
+
+# Benchmark outputs
+benchmarks/*.csv
+
+# Video outputs
+outputs/
+
+# Datasets — too large for git
+datasets/raw/
+datasets/processed/
+datasets/splits/
+
+# Jupyter notebooks (if any)
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local

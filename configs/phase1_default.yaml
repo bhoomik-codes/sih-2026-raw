@@ -1,0 +1,36 @@
+# Camera configuration
+camera:
+  source: "test_video.mp4"    # Replace with RTSP URL: rtsp://192.168.x.x:554/stream
+  name: "BOP-CAM-01"
+  max_queue_size: 2           # CRITICAL: keep small. 2 = latest-frame strategy.
+  reconnect_delay_s: 3.0      # Seconds to wait before reconnecting on stream loss
+
+# Detector configuration
+detector:
+  model: "yolov8n.pt"         # Start with nano. Benchmark before upgrading to yolov8s.
+  device: "cuda:0"            # RTX 4050. Use "cpu" for Laptop 2 / fallback.
+  conf_threshold: 0.40        # Lower = more detections, more false positives
+  iou_threshold: 0.45         # NMS overlap threshold
+  imgsz: 640                  # Inference resolution (square). See benchmark results.
+  inference_every_n_frames: 3 # Only run inference every N frames (camera / AI FPS decoupling)
+  half: false                 # FP16 — enable in Phase 7 after TensorRT validation
+  verbose: false              # Suppress Ultralytics console spam
+
+# Preprocessing
+preprocessing:
+  resize: [640, 640]          # Target inference resolution (must match imgsz)
+  roi_polygon: null           # Null = full frame. Set to polygon for zone restriction.
+                              # Format: [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+
+# Output and display
+output:
+  display: true               # Show annotated video in OpenCV window
+  save_annotated: false       # Write annotated frames to output_video_path
+  output_video_path: null     # e.g. "outputs/annotated.mp4"
+  metrics_csv: "benchmarks/phase1_run.csv"
+  metrics_print_every_n: 30   # Print metrics summary every N processed frames
+
+# Classes to detect (COCO IDs)
+# 0=person, 2=car, 3=motorcycle, 5=bus, 7=truck
+# Already filtered in YOLODetector._relevant_ids. Override here if needed.
+classes_to_detect: [0, 2, 3, 5, 7]
