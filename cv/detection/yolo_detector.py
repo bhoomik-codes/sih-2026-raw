@@ -54,7 +54,7 @@ class YOLODetector(DetectorBase):
         conf_threshold   (float) : Minimum confidence to report. Default: 0.40
         iou_threshold    (float) : NMS IoU threshold. Default: 0.45
         imgsz            (int)   : Inference resolution (square). Default: 640
-        half             (bool)  : Use FP16 inference. Default: False (Phase 7)
+        half             (bool)  : Use FP16 (quantized) inference. Default: False (Phase 7)
         classes          (list)  : Override default relevant class IDs.
         verbose          (bool)  : Suppress Ultralytics console spam. Default: False
 
@@ -74,7 +74,7 @@ class YOLODetector(DetectorBase):
         self._conf: float = float(det_cfg.get("conf_threshold", 0.40))
         self._iou: float = float(det_cfg.get("iou_threshold", 0.45))
         self._imgsz: int = int(det_cfg.get("imgsz", 640))
-        self._half: bool = bool(det_cfg.get("half", False))
+        self._quantize: bool = bool(det_cfg.get("half", False))  # kept as 'half' in YAML for clarity
         self._verbose: bool = bool(det_cfg.get("verbose", False))
 
         # Class filter — override via config if needed
@@ -102,8 +102,8 @@ class YOLODetector(DetectorBase):
         self._model = YOLO(self._model_path, verbose=self._verbose)
         self._model.to(self._device)
 
-        if self._half:
-            logger.info("FP16 (half) mode enabled — Phase 7+ only")
+        if self._quantize:
+            logger.info("FP16 (quantize) mode enabled — Phase 7+ only")
 
         self._loaded = True
         logger.info(
@@ -139,7 +139,6 @@ class YOLODetector(DetectorBase):
                 conf=self._conf,
                 iou=self._iou,
                 imgsz=self._imgsz,
-                half=self._half,
                 device=self._device,
                 verbose=False,  # always suppress per-frame console spam
                 stream=False,

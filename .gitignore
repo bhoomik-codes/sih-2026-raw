@@ -15,13 +15,15 @@ build/
 venv/
 env/
 
-# Model weights — store separately, not in git
+# Model weights — large binary files, store separately
 models/pytorch/*.pt
 models/pytorch/*.pth
 models/onnx/*.onnx
 models/tensorrt/*.engine
 models/tensorrt/*.trt
 
+# Test and development videos
+# (Tracking these manually as requested by user)
 # Benchmark outputs
 benchmarks/*.csv
 

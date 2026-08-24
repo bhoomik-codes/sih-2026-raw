@@ -1,26 +1,27 @@
 # Camera configuration
 camera:
-  source: "test_video.mp4"    # Replace with RTSP URL: rtsp://192.168.x.x:554/stream
+  source: "data/videos/border_crossing_test.mp4"  # Real border surveillance footage (47s, 960x720, 30fps)
+  # source: "data/videos/test_video.mp4"           # Generic outdoor fallback
+  # source: "rtsp://192.168.x.x:554/stream"        # Live RTSP camera
   name: "BOP-CAM-01"
   max_queue_size: 2           # CRITICAL: keep small. 2 = latest-frame strategy.
   reconnect_delay_s: 3.0      # Seconds to wait before reconnecting on stream loss
 
 # Detector configuration
 detector:
-  model: "yolov8n.pt"         # Start with nano. Benchmark before upgrading to yolov8s.
+  model: "models/pytorch/yolov8n.pt"   # Start with nano. Benchmark before upgrading to yolov8s.
   device: "cuda:0"            # RTX 4050. Use "cpu" for Laptop 2 / fallback.
-  conf_threshold: 0.40        # Lower = more detections, more false positives
+  conf_threshold: 0.25        # Lowered for surveillance: person may be small/distant
   iou_threshold: 0.45         # NMS overlap threshold
-  imgsz: 640                  # Inference resolution (square). See benchmark results.
+  imgsz: 960                  # Higher res catches small/distant subjects better (vs 640)
   inference_every_n_frames: 3 # Only run inference every N frames (camera / AI FPS decoupling)
   half: false                 # FP16 — enable in Phase 7 after TensorRT validation
   verbose: false              # Suppress Ultralytics console spam
 
 # Preprocessing
 preprocessing:
-  resize: [640, 640]          # Target inference resolution (must match imgsz)
-  roi_polygon: null           # Null = full frame. Set to polygon for zone restriction.
-                              # Format: [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+  resize: [960, 960]          # Must match imgsz above
+  roi_polygon: null           # Null = full frame.
 
 # Output and display
 output:

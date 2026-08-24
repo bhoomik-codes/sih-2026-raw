@@ -3,24 +3,44 @@
 **SIH 2026 · Problem Statement SIH26187**  
 **Organization:** Ministry of Home Affairs / Sashastra Seema Bal
 
-> Transform existing IP-based CCTV infrastructure into an AI-powered border surveillance platform — without expensive dedicated hardware.
+> Transform existing IP-based CCTV infrastructure into an AI-powered border surveillance
+> platform — without expensive dedicated hardware.
 
 ---
 
-## Architecture Overview
+## System Architecture
 
 ```
-CCTV Camera (RTSP)
-      ↓
- Laptop 1 — AI Edge Node (RTX 4050)
-      ↓  [WebSocket / Events]
- Laptop 2 — Command Center Dashboard
-```
-
-### Pipeline
-
-```
-Raw Video → Detection → Tracking → Event Engine → Risk Engine → Incident → Alert
+┌────────────────────────────────────┐
+│         CCTV CAMERAS               │
+│   RTSP / IP Stream / Local File    │
+└────────────────┬───────────────────┘
+                 │
+                 ▼ LAN / Wi-Fi
+┌────────────────────────────────────┐
+│         LAPTOP 1                   │
+│   Intel i5 13th Gen · RTX 4050     │
+│                                    │
+│   ┌──────────────────────────┐     │
+│   │   apps/edge/             │     │  ← AI Edge Node (GPU)
+│   │   AI Inference Pipeline  │     │
+│   └──────────────────────────┘     │
+│   ┌──────────────────────────┐     │
+│   │   apps/backend/          │     │  ← FastAPI + WebSocket (Phase 9)
+│   │   Event Router & API     │     │
+│   └──────────────────────────┘     │
+└────────────────┬───────────────────┘
+                 │ Structured Events / WebSocket
+                 ▼
+┌────────────────────────────────────┐
+│         LAPTOP 2                   │
+│   Intel i5-1334U · Iris Xe         │
+│                                    │
+│   ┌──────────────────────────┐     │
+│   │   apps/dashboard/        │     │  ← React Command Center (Phase 9)
+│   │   Live Map + Alerts      │     │
+│   └──────────────────────────┘     │
+└────────────────────────────────────┘
 ```
 
 ---
@@ -29,98 +49,116 @@ Raw Video → Detection → Tracking → Event Engine → Risk Engine → Incide
 
 ```
 ibvap/
+│
 ├── apps/
-│   ├── edge/           ← Phase 1: Detection loop (Laptop 1)
-│   ├── backend/        ← Phase 9: FastAPI + WebSocket server
-│   └── dashboard/      ← Phase 9: React command center (Laptop 2)
-├── cv/
-│   ├── detection/      ← Detector abstraction (DetectorBase, YOLODetector)
-│   ├── tracking/       ← Phase 2: ByteTrack / BoT-SORT
-│   ├── anpr/           ← Phase 5: Plate detection + OCR
+│   ├── edge/           ← 🟢 Phase 1 ACTIVE — AI inference node (Laptop 1 GPU)
+│   ├── backend/        ← ⏳ Phase 9 — FastAPI + WebSocket event broker
+│   └── dashboard/      ← ⏳ Phase 9 — React command center (Laptop 2)
+│
+├── cv/                 ← Computer vision modules (no business logic)
+│   ├── detection/      ← DetectorBase + YOLODetector
+│   ├── tracking/       ← ⏳ Phase 2 — ByteTrack / BoT-SORT
+│   ├── anpr/           ← ⏳ Phase 5 — Plate detection + OCR
+│   ├── face/           ← ⏳ Phase 3+ — Face detection
 │   └── preprocessing/  ← Frame resize, ROI masking
-├── intelligence/
-│   ├── events/         ← Phase 3: Virtual fence, loitering, line crossing
-│   ├── rules/          ← Phase 3: Rule evaluation engine
-│   ├── risk/           ← Phase 4: Risk scoring
-│   └── incidents/      ← Phase 4: Incident generation
-├── pipelines/          ← Phase 8: GStreamer / DeepStream
-├── models/             ← Model weights (not committed to git)
+│
+├── intelligence/       ← Event intelligence (geometry + rules, NOT neural nets)
+│   ├── events/         ← ⏳ Phase 3 — Virtual fence, loitering, line crossing
+│   ├── rules/          ← ⏳ Phase 3 — Rule evaluation engine
+│   ├── risk/           ← ⏳ Phase 4 — Risk scoring
+│   └── incidents/      ← ⏳ Phase 4 — Incident generation + correlation
+│
+├── pipelines/          ← Video pipeline backends
+│   ├── opencv/         ← ⏳ Current Python prototype
+│   ├── gstreamer/      ← ⏳ Phase 8 — Hardware decode
+│   └── deepstream/     ← ⏳ Phase 8 — NVIDIA DeepStream multi-stream
+│
+├── models/
+│   ├── pytorch/        ← .pt weight files (not committed to git)
+│   ├── onnx/           ← ⏳ Phase 7 — exported ONNX models
+│   └── tensorrt/       ← ⏳ Phase 7 — compiled TRT engines
+│
+├── data/
+│   └── videos/         ← Test video files (not committed to git)
+│
+├── datasets/           ← Training datasets (not committed to git)
 ├── benchmarks/         ← Benchmark scripts + results
-├── configs/            ← YAML configs per phase / camera
+├── configs/            ← YAML configs per phase/camera
+├── scripts/            ← Utility scripts (download test video, etc.)
 ├── tests/              ← Unit + integration tests
-├── docs/
-├── KNOWN_ISSUES.md
+├── docker/             ← ⏳ Phase 9 — Dockerfiles
+├── docs/               ← Technical documentation
+│
+├── conftest.py         ← pytest root config
+├── KNOWN_ISSUES.md     ← Bug tracker
+├── README.md
 └── pyproject.toml
 ```
+
+> **Legend:** 🟢 Active · ⏳ Planned
 
 ---
 
 ## Hardware
 
-| Machine | Role | Specs |
-|---------|------|-------|
-| **Laptop 1** | AI Edge Processing Node | Intel i5 13th Gen · 16 GB RAM · **RTX 4050 6 GB VRAM** |
+| Machine | Role | Key Specs |
+|---------|------|-----------|
+| **Laptop 1** | AI Edge Node + Backend | Intel i5 13th Gen · 16 GB RAM · **RTX 4050 6 GB VRAM** |
 | **Laptop 2** | Command Center Dashboard | Intel i5-1334U · 16 GB DDR4 · Intel Iris Xe |
 
 ---
 
 ## Current Phase: Phase 1 — Single Camera Detection
 
-### Goals
-- Stable human and vehicle detection from a single video source
-- No memory leaks, no crashes, stable FPS over 30–60 minutes
-- Benchmark table: FPS / VRAM / latency across models and resolutions
-
 ### Quick Start
 
-#### 1. Install dependencies
+#### 1. Activate the virtual environment
 
-```bash
-# Create virtual environment (recommended)
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-
-# Linux / macOS
-source .venv/bin/activate
-
-# Install project
-pip install -e ".[dev]"
+```powershell
+# Windows PowerShell
+.\.venv\Scripts\activate
 ```
 
-#### 2. Run the edge processor
+#### 2. Get a test video
 
 ```bash
-# With a local test video
+# Automatic download (free outdoor/street scene)
+python scripts/get_test_video.py
+
+# Or manually: copy any .mp4 to:
+#   data/videos/test_video.mp4
+```
+
+#### 3. Run the edge processor
+
+```bash
 python -m apps.edge.main --config configs/phase1_default.yaml
 
-# Override source
-python -m apps.edge.main --config configs/phase1_default.yaml --source rtsp://192.168.1.10:554/stream
-
-# Headless (no display window)
+# Headless (no display window — SSH/remote)
 python -m apps.edge.main --config configs/phase1_default.yaml --no-display
+
+# Override source at CLI
+python -m apps.edge.main --config configs/phase1_default.yaml \
+    --source rtsp://192.168.1.10:554/stream
 ```
 
 **Controls (display mode):** Press `q` or `Escape` to stop.
 
-#### 3. Run the benchmark
+#### 4. Run the hardware benchmark
 
 ```bash
-# Quick benchmark — yolov8n, all resolutions, 500 frames each
+# Quick: yolov8n, all 5 resolutions, 500 frames each
 python benchmarks/phase1_benchmark.py
 
-# Multiple models
-python benchmarks/phase1_benchmark.py --model yolov8n.pt yolov8s.pt
+# Thermal soak (30 min per config)
+python benchmarks/phase1_benchmark.py --model models/pytorch/yolov8n.pt --duration 1800
 
-# Thermal soak test (30 minutes per config)
-python benchmarks/phase1_benchmark.py --model yolov8n.pt --duration 1800
-
-# Specific resolutions
-python benchmarks/phase1_benchmark.py --resolutions 640x640 1280x720
+# Compare nano vs small
+python benchmarks/phase1_benchmark.py \
+    --model models/pytorch/yolov8n.pt models/pytorch/yolov8s.pt
 ```
 
-#### 4. Run tests
+#### 5. Run tests
 
 ```bash
 pytest tests/ -v
@@ -134,15 +172,14 @@ Edit `configs/phase1_default.yaml`:
 
 ```yaml
 camera:
-  source: "test_video.mp4"   # or rtsp://...
-  max_queue_size: 2          # Keep small — latest-frame strategy
+  source: "data/videos/test_video.mp4"   # or rtsp://...
 
 detector:
-  model: "yolov8n.pt"        # yolov8n / yolov8s / yolov8m
-  device: "cuda:0"           # RTX 4050
+  model: "models/pytorch/yolov8n.pt"
+  device: "cuda:0"                        # RTX 4050
   conf_threshold: 0.40
   imgsz: 640
-  inference_every_n_frames: 3
+  inference_every_n_frames: 3             # Effective ~10 FPS inference
 ```
 
 ---
@@ -151,33 +188,33 @@ detector:
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| **Phase 0** | ✅ Hardware Benchmark | RTX 4050 baseline — CUDA, PyTorch, FPS/VRAM |
+| **Phase 0** | ✅ | Hardware Benchmark — CUDA, PyTorch, FPS/VRAM baseline |
 | **Phase 1** | 🔧 In Progress | Single Camera Detection |
-| Phase 2 | — | Multi-Object Tracking (ByteTrack / BoT-SORT) |
-| Phase 3 | — | Event Engine (Virtual Fence, Loitering, Line Crossing) |
-| Phase 4 | — | Risk + Incident Intelligence |
-| Phase 5 | — | Vehicle Intelligence + ANPR |
-| Phase 6 | — | Night-time Performance |
-| Phase 7 | — | TensorRT / ONNX Optimization |
-| Phase 8 | — | DeepStream / GStreamer Migration |
-| Phase 9 | — | Command Center (React + WebSocket + Leaflet) |
-| Phase 10 | — | Hardening + Bug Testing |
-| Phase 11 | — | SIH Competition Demo Build |
+| Phase 2 | ⏳ | Multi-Object Tracking (ByteTrack / BoT-SORT) |
+| Phase 3 | ⏳ | Event Engine (Virtual Fence, Loitering, Line Crossing) |
+| Phase 4 | ⏳ | Risk + Incident Intelligence |
+| Phase 5 | ⏳ | Vehicle Intelligence + ANPR |
+| Phase 6 | ⏳ | Night-time Performance |
+| Phase 7 | ⏳ | TensorRT / ONNX Optimization |
+| Phase 8 | ⏳ | DeepStream / GStreamer Migration |
+| Phase 9 | ⏳ | Backend API + React Command Center |
+| Phase 10 | ⏳ | Hardening + Bug Testing |
+| Phase 11 | ⏳ | SIH Competition Demo Build |
 
 ---
 
 ## Golden Rules
 
-1. Do not optimize before measuring.
-2. Do not add AI where geometry and rules are sufficient.
-3. Detection is not an incident.
-4. Do not process every frame if it provides no additional value.
-5. Current frames are more valuable than a queue of stale frames.
-6. False positives can damage the prototype more than lower detection accuracy.
-7. Build the simplest possible working pipeline first.
-8. Every feature must answer: _Does this improve the border surveillance demo?_
-9. Benchmark sustained performance, not 30-second peak performance.
-10. Before the competition: **FEATURE FREEZE**.
+1. **Measure before optimizing** — no guessing.
+2. **Geometry > AI** — don't use a neural net where a line equation works.
+3. **Detection ≠ Incident** — one frame does not make an alert.
+4. **Don't process every frame** — skip if it adds no value.
+5. **Drop stale frames** — current > historical.
+6. **False positives kill demos** — filter aggressively.
+7. **Simple pipeline first** — one camera, one detector, one fence, one alert.
+8. **Every feature must earn its place** — does it improve the border demo?
+9. **Benchmark sustained, not peak** — test for 30–60 min, not 30 seconds.
+10. **Feature freeze before competition** — no last-minute architecture changes.
 
 ---
 
@@ -185,19 +222,22 @@ detector:
 
 | Package | Purpose |
 |---------|---------|
-| `ultralytics` | YOLO detection (Phase 1) |
+| `ultralytics` | YOLO detection |
 | `opencv-python` | Video capture, annotation, display |
 | `numpy` | Array operations |
 | `pyyaml` | Config loading |
-| `pynvml` | GPU metrics (VRAM, utilization, temp) |
+| `nvidia-ml-py` | GPU metrics (VRAM, utilization, temp) |
 | `psutil` | CPU/RAM metrics |
 | `supervision` | Visualization utilities (prototype phase) |
 
 ---
 
-## Related Documentation
+## Related
 
 - [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) — Bug tracker
 - [`context.md`](context.md) — Full project context and strategic decisions
+- [`apps/edge/README.md`](apps/edge/README.md) — Edge AI node details
+- [`apps/backend/README.md`](apps/backend/README.md) — Backend API design (Phase 9)
+- [`apps/dashboard/README.md`](apps/dashboard/README.md) — Dashboard design (Phase 9)
 - [`benchmarks/`](benchmarks/) — Benchmark scripts and results
 - [`configs/`](configs/) — YAML configuration files

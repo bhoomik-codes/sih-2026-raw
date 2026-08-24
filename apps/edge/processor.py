@@ -52,6 +52,8 @@ class EdgeProcessor:
 
     Args:
         video_source:  A started VideoSource instance.
+                       NOTE: source is started INSIDE processor.run(), after warmup.
+                       This prevents short video files being consumed during GPU init.
         detector:      A loaded DetectorBase implementation.
         config:        Full config dict (from YAML). Reads:
                          processor.inference_every_n_frames  (default: 3)
@@ -114,10 +116,15 @@ class EdgeProcessor:
             self._display,
         )
 
-        # Warmup: pre-allocate GPU memory before the real loop
+        # Warmup: pre-allocate GPU memory before the real loop.
+        # We start the video source AFTER warmup so short files
+        # are not consumed during the ~13s GPU init time.
         logger.info("Running detector warmup...")
         self._detector.warmup()
         logger.info("Warmup complete.")
+
+        # Start the camera feed now that warmup is done
+        self._source.start()
 
         try:
             self._loop()
