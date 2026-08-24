@@ -23,7 +23,8 @@ models/tensorrt/*.engine
 models/tensorrt/*.trt
 
 # Test and development videos
-# (Tracking these manually as requested by user)
+data/videos/
+
 # Benchmark outputs
 benchmarks/*.csv
 
