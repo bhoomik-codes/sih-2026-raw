@@ -241,4 +241,4 @@ detector:
 - [`apps/dashboard/README.md`](apps/dashboard/README.md) — Dashboard design (Phase 9)
 - [`benchmarks/`](benchmarks/) — Benchmark scripts and results
 - [`configs/`](configs/) — YAML configuration files
-- [Google Drive Folder](https://drive.google.com/drive/folders/1gUPrg_Vshhn-fADPCzQ0ptClaKeLrFjz?usp=sharing) — Test videos
+- [`Test videos`](https://drive.google.com/drive/folders/1gUPrg_Vshhn-fADPCzQ0ptClaKeLrFjz?usp=sharing) — Test videos
