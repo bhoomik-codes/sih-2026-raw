@@ -32,9 +32,10 @@ from cv.detection.base import Detection, DetectorBase
 from cv.preprocessing.frame_prep import build_preprocessing_pipeline
 from cv.tracking.byte_tracker import ByteTracker
 from intelligence.events.engine import EventEngine
-from intelligence.events.base import SurveillanceEvent
+from intelligence.events.base import SurveillanceEvent, EventType
 from intelligence.incidents.generator import IncidentGenerator
 from intelligence.incidents.base import Incident
+from intelligence.anpr.engine import ANPREngine
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,9 @@ class EdgeProcessor:
 
         # --- Incident Engine (Phase 4) ---
         self._incident_generator = IncidentGenerator(config)
+
+        # --- ANPR Engine (Phase 5) ---
+        self._anpr_engine = ANPREngine(config, cam_name)
 
         # --- Processor settings ---
         proc = config.get("processor", config.get("output", {}))
@@ -197,6 +201,10 @@ class EdgeProcessor:
                     self._last_detections = self._tracker.update(self._last_detections)
                 # Run event engine on tracked detections
                 self._last_events = self._event_engine.update(self._last_detections)
+                
+                # Run ANPR Engine
+                anpr_events = self._anpr_engine.update(frame.data, self._last_detections)
+                self._last_events.extend(anpr_events)
                 
                 # Run incident engine
                 new_incidents = self._incident_generator.update(self._last_events)
@@ -366,6 +374,19 @@ class EdgeProcessor:
         """
         if not events:
             return
+
+        for ev in events:
+            if ev.event_type == EventType.VEHICLE_ANPR:
+                # Draw plate text above the vehicle bounding box
+                plate_text = ev.details.get("plate", "UNKNOWN")
+                x, y = int(ev.location[0]), int(ev.location[1]) - 40
+                
+                (tw, th), baseline = cv2.getTextSize(plate_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+                cv2.rectangle(frame, (x, y - th - baseline - 4), (x + tw + 16, y + 4), (0, 0, 0), cv2.FILLED)
+                cv2.rectangle(frame, (x, y - th - baseline - 4), (x + tw + 16, y + 4), (0, 255, 0), 2)
+                cv2.putText(frame, plate_text, (x + 8, y - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+            elif ev.rule_name.startswith("zone:"):
+                pass
 
         h, w = frame.shape[:2]
         _SEVERITY_COLOURS = {

@@ -108,7 +108,7 @@ ibvap/
 
 ---
 
-## Current Phase: Phase 4 — Risk + Incident Intelligence
+## Current Phase: Phase 5 — Vehicle Intelligence + ANPR
 
 ### Quick Start
 
@@ -132,13 +132,13 @@ python scripts/get_test_video.py
 #### 3. Run the edge processor
 
 ```bash
-python -m apps.edge.main --config configs/phase4_default.yaml
+python -m apps.edge.main --config configs/phase5_default.yaml
 
 # Headless (no display window — SSH/remote)
-python -m apps.edge.main --config configs/phase4_default.yaml --no-display
+python -m apps.edge.main --config configs/phase5_default.yaml --no-display
 
-# Phase 3 only (events, no incident escalation)
-python -m apps.edge.main --config configs/phase3_default.yaml
+# Phase 4 only
+python -m apps.edge.main --config configs/phase4_default.yaml
 
 # Phase 1 only (detection only, no tracking)
 python -m apps.edge.main --config configs/phase1_default.yaml
@@ -195,7 +195,7 @@ detector:
 | **Phase 2** | ✅ Done | Multi-Object Tracking (ByteTrack + trajectory history) |
 | **Phase 3** | ✅ Done | Event Engine (Virtual Fence, Loitering, Line Crossing) |
 | **Phase 4** | ✅ Done | Risk + Incident Intelligence |
-| Phase 5 | ⏳ | Vehicle Intelligence + ANPR |
+| **Phase 5** | ✅ Done | Vehicle Intelligence + ANPR |
 | Phase 6 | ⏳ | Night-time Performance |
 | Phase 7 | ⏳ | TensorRT / ONNX Optimization |
 | Phase 8 | ⏳ | DeepStream / GStreamer Migration |

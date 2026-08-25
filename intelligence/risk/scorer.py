@@ -25,6 +25,7 @@ class RiskScorer:
             EventType.LOITERING: int(cfg.get("loitering", 15)),
             EventType.ZONE_EXIT: int(cfg.get("zone_exit", 0)),
             EventType.WRONG_DIRECTION: int(cfg.get("wrong_direction", 20)),
+            EventType.VEHICLE_ANPR: int(cfg.get("vehicle_anpr", 0)),
         }
 
     def evaluate(self, events: List[SurveillanceEvent]) -> Tuple[int, EventSeverity]:
@@ -38,6 +39,10 @@ class RiskScorer:
             A tuple of (total_score, severity)
         """
         total_score = sum(self._point_map.get(e.event_type, 0) for e in events)
+        
+        # Override severity if any event is critical (e.g. ANPR Match)
+        if any(e.severity == EventSeverity.CRITICAL for e in events):
+            return max(total_score, 100), EventSeverity.CRITICAL
 
         if total_score >= 80:
             severity = EventSeverity.CRITICAL
