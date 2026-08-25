@@ -9,11 +9,12 @@ Pipeline (per frame):
     3. Every N frames: run detector → List[Detection]
     4. Run tracker → persistent track IDs + trajectory history
     5. Run EventEngine → zone/fence/loitering events
-    6. Annotate frame: bboxes, track IDs, zone overlays, event alerts
-    7. Display via OpenCV window (optional)
-    8. Write annotated frame to output video (optional)
-    9. Collect and print metrics
-    10. Graceful shutdown on KeyboardInterrupt / stop()
+    6. Run IncidentGenerator → risk scoring + incident escalation
+    7. Annotate frame: bboxes, track IDs, zone overlays, event/incident alerts
+    8. Display via OpenCV window (optional)
+    9. Write annotated frame to output video (optional)
+    10. Collect and print metrics
+    11. Graceful shutdown on KeyboardInterrupt / stop()
 """
 
 from __future__ import annotations
@@ -32,6 +33,8 @@ from cv.preprocessing.frame_prep import build_preprocessing_pipeline
 from cv.tracking.byte_tracker import ByteTracker
 from intelligence.events.engine import EventEngine
 from intelligence.events.base import SurveillanceEvent
+from intelligence.incidents.generator import IncidentGenerator
+from intelligence.incidents.base import Incident
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +88,9 @@ class EdgeProcessor:
         cam_name = config.get("camera", {}).get("name", "CAM-01")
         self._event_engine = EventEngine(config, cam_name)
 
+        # --- Incident Engine (Phase 4) ---
+        self._incident_generator = IncidentGenerator(config)
+
         # --- Processor settings ---
         proc = config.get("processor", config.get("output", {}))
         self._inference_every_n: int = int(
@@ -108,6 +114,7 @@ class EdgeProcessor:
         self._loop_frame_count: int = 0  # Frames through the inference loop
         self._last_detections: List[Detection] = []
         self._last_events: List[SurveillanceEvent] = []
+        self._active_incidents: List[Incident] = []
         self._video_writer: Optional[cv2.VideoWriter] = None
 
     # ------------------------------------------------------------------
@@ -190,6 +197,18 @@ class EdgeProcessor:
                     self._last_detections = self._tracker.update(self._last_detections)
                 # Run event engine on tracked detections
                 self._last_events = self._event_engine.update(self._last_detections)
+                
+                # Run incident engine
+                new_incidents = self._incident_generator.update(self._last_events)
+                if new_incidents:
+                    # Keep track of active incidents, trim if too many
+                    self._active_incidents.extend(new_incidents)
+                    if len(self._active_incidents) > 5:
+                        self._active_incidents = self._active_incidents[-5:]
+
+                # Cleanup stale tracks from incident engine
+                active_tids = {d.track_id for d in self._last_detections if d.track_id is not None}
+                self._incident_generator.cleanup_stale_tracks(active_tids)
 
             t_inf_end = time.perf_counter()
             inference_latency_ms = (t_inf_end - t_inf_start) * 1000.0
@@ -198,8 +217,13 @@ class EdgeProcessor:
             annotated = self._annotate(frame.data, self._last_detections)
             # Draw event zones/lines overlay
             self._event_engine.draw(annotated)
-            # Draw any active event alerts on frame
-            self._draw_events(annotated, self._last_events)
+            
+            if self._active_incidents:
+                # If we have incidents, show them prominently instead of raw events
+                self._draw_incidents(annotated, self._active_incidents)
+            else:
+                # Otherwise show raw events
+                self._draw_events(annotated, self._last_events)
 
             # --- End-to-end latency ---
             e2e_ms = (time.perf_counter() - (t_inf_start - (capture_ts - time.time()))) * 1000.0
@@ -298,6 +322,41 @@ class EdgeProcessor:
         # HUD: FPS + detections count (top-left corner)
         return out
 
+    def _draw_incidents(self, frame: np.ndarray, incidents: List[Incident]) -> None:
+        """
+        Draw active incidents as a high-visibility banner.
+        """
+        if not incidents:
+            return
+
+        h, w = frame.shape[:2]
+        _SEVERITY_COLOURS = {
+            "low":      (180, 180, 180),
+            "medium":   (0, 165, 255),
+            "high":     (0, 0, 255),
+            "critical": (0, 0, 255),  # Flashing handled below
+        }
+
+        y = h - 10
+        # Draw up to 3 most recent incidents from bottom up
+        for inc in reversed(incidents[-3:]):
+            colour = _SEVERITY_COLOURS.get(inc.severity.value, (200, 200, 200))
+            
+            # Make critical incidents flash
+            if inc.severity.value == "critical":
+                # Flash every ~0.25 seconds
+                if int(time.time() * 4) % 2 == 0:
+                    colour = (255, 255, 255) # Flash white
+
+            text = f"!!! INCIDENT: {inc.description} [Track #{inc.track_id}] !!!"
+            (tw, th), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+            
+            # Red background for the text
+            cv2.rectangle(frame, (8, y - th - baseline - 4), (tw + 16, y + 4), (0, 0, 150), cv2.FILLED)
+            cv2.rectangle(frame, (8, y - th - baseline - 4), (tw + 16, y + 4), colour, 2)
+            cv2.putText(frame, text, (12, y - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour, 2, cv2.LINE_AA)
+            y -= th + baseline + 12
+
     def _draw_events(
         self, frame: np.ndarray, events: "List[SurveillanceEvent]"
     ) -> None:
@@ -333,10 +392,12 @@ class EdgeProcessor:
     ) -> None:
         """Draw a semi-transparent HUD overlay on the frame (in-place)."""
         num_events = len(self._last_events)
+        num_incidents = len(self._active_incidents)
         hud_lines = [
             f"FPS: {fps:.1f}",
             f"Det: {num_det}",
             f"Events: {num_events}",
+            f"Incidents: {num_incidents}",
             f"Drop: {dropped}",
             f"Cam: {self._source.name}",
         ]
