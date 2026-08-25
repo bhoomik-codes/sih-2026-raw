@@ -1,22 +1,19 @@
 """
 apps.edge.processor
 ---------------------
-EdgeProcessor — the central inference loop for Phase 1.
+EdgeProcessor — the central inference loop for Phases 1-3.
 
 Pipeline (per frame):
     1. Read frame from VideoSource (latest-frame queue)
     2. Apply preprocessing (ROI mask → resize)
     3. Every N frames: run detector → List[Detection]
-    4. Annotate frame with bounding boxes and labels
-    5. Display via OpenCV window (optional)
-    6. Write annotated frame to output video (optional)
-    7. Collect and print metrics (FPS, VRAM, latency, etc.)
-    8. Graceful shutdown on KeyboardInterrupt / stop()
-
-Phase 2+:
-    Step 3.5 will insert: Tracker → persistent track IDs
-    Step 3.6 will insert: Event Engine → zone/fence/loitering checks
-    These are not present in Phase 1.
+    4. Run tracker → persistent track IDs + trajectory history
+    5. Run EventEngine → zone/fence/loitering events
+    6. Annotate frame: bboxes, track IDs, zone overlays, event alerts
+    7. Display via OpenCV window (optional)
+    8. Write annotated frame to output video (optional)
+    9. Collect and print metrics
+    10. Graceful shutdown on KeyboardInterrupt / stop()
 """
 
 from __future__ import annotations
@@ -32,6 +29,9 @@ from apps.edge.metrics import MetricsCollector
 from apps.edge.video_source import Frame, VideoSource
 from cv.detection.base import Detection, DetectorBase
 from cv.preprocessing.frame_prep import build_preprocessing_pipeline
+from cv.tracking.byte_tracker import ByteTracker
+from intelligence.events.engine import EventEngine
+from intelligence.events.base import SurveillanceEvent
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,17 @@ class EdgeProcessor:
         self._detector = detector
         self._config = config
 
+        # --- Tracker ---
+        tracker_type = config.get("tracker", {}).get("type", None)
+        if tracker_type == "bytetrack":
+            self._tracker = ByteTracker(config)
+        else:
+            self._tracker = None
+
+        # --- Event Engine (Phase 3) ---
+        cam_name = config.get("camera", {}).get("name", "CAM-01")
+        self._event_engine = EventEngine(config, cam_name)
+
         # --- Processor settings ---
         proc = config.get("processor", config.get("output", {}))
         self._inference_every_n: int = int(
@@ -96,6 +107,7 @@ class EdgeProcessor:
         self._running: bool = False
         self._loop_frame_count: int = 0  # Frames through the inference loop
         self._last_detections: List[Detection] = []
+        self._last_events: List[SurveillanceEvent] = []
         self._video_writer: Optional[cv2.VideoWriter] = None
 
     # ------------------------------------------------------------------
@@ -173,12 +185,21 @@ class EdgeProcessor:
                 self._last_detections = self._detector.detect(
                     processed, frame_id=frame.frame_id
                 )
+                # Run tracking if enabled, only on new detections
+                if self._tracker is not None:
+                    self._last_detections = self._tracker.update(self._last_detections)
+                # Run event engine on tracked detections
+                self._last_events = self._event_engine.update(self._last_detections)
 
             t_inf_end = time.perf_counter()
             inference_latency_ms = (t_inf_end - t_inf_start) * 1000.0
 
             # --- Annotation ---
             annotated = self._annotate(frame.data, self._last_detections)
+            # Draw event zones/lines overlay
+            self._event_engine.draw(annotated)
+            # Draw any active event alerts on frame
+            self._draw_events(annotated, self._last_events)
 
             # --- End-to-end latency ---
             e2e_ms = (time.perf_counter() - (t_inf_start - (capture_ts - time.time()))) * 1000.0
@@ -277,13 +298,45 @@ class EdgeProcessor:
         # HUD: FPS + detections count (top-left corner)
         return out
 
+    def _draw_events(
+        self, frame: np.ndarray, events: "List[SurveillanceEvent]"
+    ) -> None:
+        """
+        Draw active event alerts as a scrolling banner at the bottom of the frame.
+        Each event is shown as a coloured pill with the event type and track ID.
+        """
+        if not events:
+            return
+
+        h, w = frame.shape[:2]
+        _SEVERITY_COLOURS = {
+            "low":      (180, 180, 180),
+            "medium":   (0, 165, 255),   # Orange
+            "high":     (0, 0, 255),     # Red
+            "critical": (0, 0, 200),     # Dark red + flash
+        }
+
+        y = h - 10
+        # Draw up to 5 most recent events from bottom up
+        for ev in reversed(events[-5:]):
+            colour = _SEVERITY_COLOURS.get(ev.severity.value, (200, 200, 200))
+            text = f"! {ev.event_type.name.replace('_', ' ')} | #{ev.track_id} | {ev.rule_name}"
+            (tw, th), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
+            # Background pill
+            cv2.rectangle(frame, (8, y - th - baseline - 2), (tw + 16, y + 2), (20, 20, 20), cv2.FILLED)
+            cv2.rectangle(frame, (8, y - th - baseline - 2), (tw + 16, y + 2), colour, 1)
+            cv2.putText(frame, text, (12, y - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.55, colour, 1, cv2.LINE_AA)
+            y -= th + baseline + 8
+
     def _draw_hud(
         self, frame: np.ndarray, fps: float, num_det: int, dropped: int
     ) -> None:
         """Draw a semi-transparent HUD overlay on the frame (in-place)."""
+        num_events = len(self._last_events)
         hud_lines = [
             f"FPS: {fps:.1f}",
             f"Det: {num_det}",
+            f"Events: {num_events}",
             f"Drop: {dropped}",
             f"Cam: {self._source.name}",
         ]

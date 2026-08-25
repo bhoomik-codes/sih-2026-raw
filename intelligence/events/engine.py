@@ -1,0 +1,101 @@
+"""
+intelligence.events.engine
+----------------------------
+EventEngine — the main orchestrator for Phase 3.
+
+Composes VirtualFenceEngine, LineCrossingEngine, and LoiteringEngine into a
+single interface that the EdgeProcessor calls once per inference step.
+
+Responsibilities:
+    - Initialize all sub-engines from YAML config.
+    - Call each sub-engine's update() with the current tracked detections.
+    - Collect and return all events fired in the current frame.
+    - Provide draw() to annotate all zones/lines on a video frame.
+    - Log events using structed logging (not print statements).
+
+Config structure (from YAML):
+    event_engine:
+      camera_name: "BOP-CAM-01"    # auto-inherited from camera.name
+      zones: [...]                  # see virtual_fence.py
+      lines: [...]                  # see line_crossing.py
+      loitering_zones: [...]        # see loitering.py
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import List
+
+import numpy as np
+
+from cv.detection.base import Detection
+from intelligence.events.base import SurveillanceEvent
+from intelligence.events.line_crossing import LineCrossingEngine
+from intelligence.events.loitering import LoiteringEngine
+from intelligence.events.virtual_fence import VirtualFenceEngine
+
+logger = logging.getLogger(__name__)
+
+
+class EventEngine:
+    """
+    Orchestrates all event detection rules.
+
+    Args:
+        config:      Full YAML config dict. Reads from ``event_engine`` block.
+        camera_name: Camera identifier (typically from config.camera.name).
+    """
+
+    def __init__(self, config: dict, camera_name: str) -> None:
+        ee_cfg = config.get("event_engine", {})
+        self._camera_name = camera_name
+        self._enabled = bool(ee_cfg.get("enabled", True))
+
+        zones_cfg = ee_cfg.get("zones", [])
+        lines_cfg = ee_cfg.get("lines", [])
+        loiter_cfg = ee_cfg.get("loitering_zones", [])
+
+        self._fence: VirtualFenceEngine = VirtualFenceEngine(zones_cfg, camera_name)
+        self._crossing: LineCrossingEngine = LineCrossingEngine(lines_cfg, camera_name)
+        self._loitering: LoiteringEngine = LoiteringEngine(loiter_cfg, camera_name)
+
+        total_rules = len(zones_cfg) + len(lines_cfg) + len(loiter_cfg)
+        logger.info(
+            "EventEngine initialised  camera=%s  zones=%d  lines=%d  loitering=%d",
+            camera_name, len(zones_cfg), len(lines_cfg), len(loiter_cfg),
+        )
+
+    def update(self, detections: List[Detection]) -> List[SurveillanceEvent]:
+        """
+        Evaluate all rules against the latest tracked detections.
+
+        Args:
+            detections: Tracked detections from ByteTracker (track_id must be set).
+
+        Returns:
+            All SurveillanceEvents fired this frame (may be empty).
+        """
+        if not self._enabled or not detections:
+            return []
+
+        events: List[SurveillanceEvent] = []
+        events.extend(self._fence.update(detections))
+        events.extend(self._crossing.update(detections))
+        events.extend(self._loitering.update(detections))
+
+        for ev in events:
+            logger.info("EVENT  %s", ev)
+
+        return events
+
+    def draw(self, frame: np.ndarray) -> None:
+        """
+        Draw all zones and lines on the frame in-place.
+
+        Call this before displaying or saving the annotated frame.
+        """
+        if not self._enabled:
+            return
+        self._fence.draw(frame)
+        self._crossing.draw(frame)
+        self._loitering.draw(frame)

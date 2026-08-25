@@ -51,7 +51,7 @@
 ibvap/
 │
 ├── apps/
-│   ├── edge/           ← 🟢 Phase 1 ACTIVE — AI inference node (Laptop 1 GPU)
+│   ├── edge/           ← 🟢 Phases 1-3 ACTIVE — AI inference + event engine (Laptop 1 GPU)
 │   ├── backend/        ← ⏳ Phase 9 — FastAPI + WebSocket event broker
 │   └── dashboard/      ← ⏳ Phase 9 — React command center (Laptop 2)
 │
@@ -63,8 +63,8 @@ ibvap/
 │   └── preprocessing/  ← Frame resize, ROI masking
 │
 ├── intelligence/       ← Event intelligence (geometry + rules, NOT neural nets)
-│   ├── events/         ← ⏳ Phase 3 — Virtual fence, loitering, line crossing
-│   ├── rules/          ← ⏳ Phase 3 — Rule evaluation engine
+│   ├── events/         ← 🟢 Phase 3 — Virtual fence, loitering, line crossing
+│   ├── rules/          ← ⏳ Phase 4 — Rule evaluation engine
 │   ├── risk/           ← ⏳ Phase 4 — Risk scoring
 │   └── incidents/      ← ⏳ Phase 4 — Incident generation + correlation
 │
@@ -108,7 +108,7 @@ ibvap/
 
 ---
 
-## Current Phase: Phase 1 — Single Camera Detection
+## Current Phase: Phase 3 — Event Intelligence Engine
 
 ### Quick Start
 
@@ -132,14 +132,16 @@ python scripts/get_test_video.py
 #### 3. Run the edge processor
 
 ```bash
-python -m apps.edge.main --config configs/phase1_default.yaml
+python -m apps.edge.main --config configs/phase3_default.yaml
 
 # Headless (no display window — SSH/remote)
-python -m apps.edge.main --config configs/phase1_default.yaml --no-display
+python -m apps.edge.main --config configs/phase3_default.yaml --no-display
 
-# Override source at CLI
-python -m apps.edge.main --config configs/phase1_default.yaml \
-    --source rtsp://192.168.1.10:554/stream
+# Phase 2 only (tracking, no event engine zones)
+python -m apps.edge.main --config configs/phase2_default.yaml
+
+# Phase 1 only (detection only, no tracking)
+python -m apps.edge.main --config configs/phase1_default.yaml
 ```
 
 **Controls (display mode):** Press `q` or `Escape` to stop.
@@ -188,10 +190,10 @@ detector:
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| **Phase 0** | ✅ | Hardware Benchmark — CUDA, PyTorch, FPS/VRAM baseline |
-| **Phase 1** | 🔧 In Progress | Single Camera Detection |
-| Phase 2 | ⏳ | Multi-Object Tracking (ByteTrack / BoT-SORT) |
-| Phase 3 | ⏳ | Event Engine (Virtual Fence, Loitering, Line Crossing) |
+| **Phase 0** | ✅ Done | Hardware Benchmark — CUDA, PyTorch, FPS/VRAM baseline |
+| **Phase 1** | ✅ Done | Single Camera Detection |
+| **Phase 2** | ✅ Done | Multi-Object Tracking (ByteTrack + trajectory history) |
+| **Phase 3** | 🔧 In Progress | Event Engine (Virtual Fence, Loitering, Line Crossing) |
 | Phase 4 | ⏳ | Risk + Incident Intelligence |
 | Phase 5 | ⏳ | Vehicle Intelligence + ANPR |
 | Phase 6 | ⏳ | Night-time Performance |
