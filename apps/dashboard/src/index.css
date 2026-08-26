@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #0c141f;
+    color: #dce2f3;
+    font-family: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  /* Tactical custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #070e19;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #232a36;
+    border-radius: 2px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #45474a;
+  }
+}
+
+/* Tactical Panel Cell */
+.tactical-cell {
+  background-color: #19202b;
+  border: 1px solid #232a36;
+  border-radius: 4px;
+}
+
+/* Tactical Severity Left Stripe Chips */
+.severity-critical {
+  border-left: 3px solid #ef4444 !important;
+  background-color: rgba(239, 68, 68, 0.08);
+}
+.severity-high {
+  border-left: 3px solid #f97316 !important;
+  background-color: rgba(249, 115, 22, 0.08);
+}
+.severity-medium {
+  border-left: 3px solid #eab308 !important;
+  background-color: rgba(234, 179, 8, 0.08);
+}
+.severity-low {
+  border-left: 3px solid #06b6d4 !important;
+  background-color: rgba(6, 182, 212, 0.08);
+}
+
+/* Leaflet clean dark map */
+.leaflet-container {
+  background-color: #070e19 !important;
+  font-family: 'Hanken Grotesk', sans-serif;
+}
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background: #19202b !important;
+  color: #dce2f3 !important;
+  border: 1px solid #374151 !important;
+  border-radius: 2px !important;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5) !important;
+}
+.leaflet-popup-content {
+  margin: 8px 10px !important;
+  line-height: 1.3 !important;
+}
