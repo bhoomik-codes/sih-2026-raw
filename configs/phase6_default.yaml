@@ -1,5 +1,6 @@
-# Phase 5 — Vehicle Intelligence & ANPR Configuration
-# Camera: 960x720 border surveillance footage
+﻿# Phase 6 — Night-time Performance Configuration
+# Adds CLAHE low-light preprocessing + night activity detection.
+# Based on Phase 5 config with night-mode additions.
 
 camera:
   source: "data/videos/test_video.mp4"
@@ -15,11 +16,15 @@ detector:
   imgsz: 960
   inference_every_n_frames: 1
   half: false
-  verbose: true
+  verbose: false
 
 preprocessing:
   resize: [960, 960]
   roi_polygon: null
+  # Phase 6: Enable CLAHE low-light enhancement
+  low_light: true
+  clahe_clip: 2.5       # Higher clip = more aggressive contrast boost
+  clahe_grid: [8, 8]
 
 tracker:
   type: "bytetrack"
@@ -57,8 +62,15 @@ event_engine:
       threshold_s: 8.0
       classes: ["person", "car", "truck"]
       severity: "medium"
+  # Phase 6: Night-time activity detection
+  night_activity:
+    enabled: true
+    night_start_hour: 20     # 8 PM
+    night_end_hour: 6        # 6 AM
+    classes: ["person"]      # People moving at night = highest priority
+    severity: "high"
+    cooldown_s: 30.0         # 30s per-track cooldown
 
-# --- Phase 4 Additions ---
 risk_engine:
   zone_entry: 30
   line_crossing: 40
@@ -66,13 +78,13 @@ risk_engine:
   zone_exit: 0
   wrong_direction: 20
   vehicle_anpr: 10
+  night_movement: 20        # Phase 6: Night movement adds 20 pts
 
 incident_engine:
   enabled: true
   escalation_threshold: 50
   cooldown_s: 10.0
 
-# --- Phase 5 Additions ---
 anpr_engine:
   enabled: true
   min_crop_area: 4000
@@ -85,5 +97,5 @@ output:
   display: true
   save_annotated: false
   output_video_path: null
-  metrics_csv: "benchmarks/phase5_run.csv"
+  metrics_csv: "benchmarks/phase6_run.csv"
   metrics_print_every_n: 30

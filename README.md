@@ -51,32 +51,35 @@
 ibvap/
 │
 ├── apps/
-│   ├── edge/           ← 🟢 Phases 1-3 ACTIVE — AI inference + event engine (Laptop 1 GPU)
+│   ├── edge/           ← 🟢 Phases 1-8 — AI inference + event engine (Laptop 1 GPU)
+│   │   ├── main.py     ← Single-camera entry point (pytorch or onnx backend)
+│   │   └── multi_main.py ← Multi-camera entry point (Phase 8)
 │   ├── backend/        ← ⏳ Phase 9 — FastAPI + WebSocket event broker
 │   └── dashboard/      ← ⏳ Phase 9 — React command center (Laptop 2)
 │
 ├── cv/                 ← Computer vision modules (no business logic)
-│   ├── detection/      ← DetectorBase + YOLODetector
-│   ├── tracking/       ← ⏳ Phase 2 — ByteTrack / BoT-SORT
-│   ├── anpr/           ← ⏳ Phase 5 — Plate detection + OCR
+│   ├── detection/      ← 🟢 DetectorBase + YOLODetector + ONNXDetector (Phase 7)
+│   ├── tracking/       ← 🟢 Phase 2 — ByteTrack
+│   ├── anpr/           ← 🟢 Phase 5 — Plate detection + OCR
 │   ├── face/           ← ⏳ Phase 3+ — Face detection
-│   └── preprocessing/  ← Frame resize, ROI masking
+│   └── preprocessing/  ← 🟢 Frame resize, ROI masking, CLAHE (Phase 6)
 │
 ├── intelligence/       ← Event intelligence (geometry + rules, NOT neural nets)
-│   ├── events/         ← 🟢 Phase 3 — Virtual fence, loitering, line crossing
-│   ├── rules/          ← ⏳ Phase 4 — Rule evaluation engine
-│   ├── risk/           ← ⏳ Phase 4 — Risk scoring
-│   └── incidents/      ← ⏳ Phase 4 — Incident generation + correlation
+│   ├── events/         ← 🟢 Phases 3+6 — Fence, loitering, crossing, night activity
+│   ├── rules/          ← 🟢 Phase 4 — Rule evaluation engine
+│   ├── risk/           ← 🟢 Phase 4+6 — Risk scoring (incl. NIGHT_MOVEMENT)
+│   └── incidents/      ← 🟢 Phase 4 — Incident generation + correlation
 │
-├── pipelines/          ← Video pipeline backends
-│   ├── opencv/         ← ⏳ Current Python prototype
-│   ├── gstreamer/      ← ⏳ Phase 8 — Hardware decode
-│   └── deepstream/     ← ⏳ Phase 8 — NVIDIA DeepStream multi-stream
+├── pipelines/          ← 🟢 Phase 8 — Video pipeline backends
+│   ├── base.py         ← VideoPipelineBase abstract class
+│   ├── opencv/         ← 🟢 OpenCVPipeline (default, production-ready)
+│   ├── gstreamer/      ← 🟢 GStreamerPipeline (hardware decode, fallback safe)
+│   └── deepstream/     ← ⏳ Future — NVIDIA DeepStream multi-stream
 │
 ├── models/
 │   ├── pytorch/        ← .pt weight files (not committed to git)
-│   ├── onnx/           ← ⏳ Phase 7 — exported ONNX models
-│   └── tensorrt/       ← ⏳ Phase 7 — compiled TRT engines
+│   ├── onnx/           ← 🟢 Phase 7 — ONNX models (run scripts/export_onnx.py)
+│   └── tensorrt/       ← 🟢 Phase 7 — TRT engines (run scripts/export_tensorrt.py)
 │
 ├── data/
 │   └── videos/         ← Test video files (not committed to git)
@@ -108,7 +111,7 @@ ibvap/
 
 ---
 
-## Current Phase: Phase 5 — Vehicle Intelligence + ANPR
+## Current Phase: Phase 8 — Multi-Camera / GStreamer Pipeline
 
 ### Quick Start
 
@@ -129,41 +132,51 @@ python scripts/get_test_video.py
 #   data/videos/test_video.mp4
 ```
 
-#### 3. Run the edge processor
+#### 3. Run single-camera (Phase 5 baseline)
 
 ```bash
+# Phase 5 — ANPR + Vehicle detection
 python -m apps.edge.main --config configs/phase5_default.yaml
 
+# Phase 6 — Night-mode + CLAHE low-light enhancement
+python -m apps.edge.main --config configs/phase6_default.yaml
+
+# Phase 7 — ONNX Runtime backend (export model first)
+python scripts/export_onnx.py
+python -m apps.edge.main --config configs/phase7_default.yaml
+
 # Headless (no display window — SSH/remote)
-python -m apps.edge.main --config configs/phase5_default.yaml --no-display
-
-# Phase 4 only
-python -m apps.edge.main --config configs/phase4_default.yaml
-
-# Phase 1 only (detection only, no tracking)
-python -m apps.edge.main --config configs/phase1_default.yaml
+python -m apps.edge.main --config configs/phase6_default.yaml --no-display
 ```
 
 **Controls (display mode):** Press `q` or `Escape` to stop.
 
-#### 4. Run the hardware benchmark
+#### 4. Run multi-camera (Phase 8)
 
 ```bash
-# Quick: yolov8n, all 5 resolutions, 500 frames each
-python benchmarks/phase1_benchmark.py
-
-# Thermal soak (30 min per config)
-python benchmarks/phase1_benchmark.py --model models/pytorch/yolov8n.pt --duration 1800
-
-# Compare nano vs small
-python benchmarks/phase1_benchmark.py \
-    --model models/pytorch/yolov8n.pt models/pytorch/yolov8s.pt
+# Phase 8 — 2 cameras concurrently (headless by default)
+python -m apps.edge.multi_main --config configs/phase8_default.yaml
 ```
 
-#### 5. Run tests
+#### 5. Run benchmarks
+
+```bash
+# Phase 1 — baseline resolution/FPS benchmark
+python benchmarks/phase1_benchmark.py
+
+# Phase 7 — PyTorch vs ONNX backend comparison
+python scripts/export_onnx.py   # export model first
+python benchmarks/phase7_benchmark.py
+
+# Phase 8 — 1 vs 2 cameras concurrently
+python benchmarks/phase8_benchmark.py
+```
+
+#### 6. Run tests
 
 ```bash
 pytest tests/ -v
+# Expected: 132 passed (Phases 1-8)
 ```
 
 ---
@@ -196,9 +209,9 @@ detector:
 | **Phase 3** | ✅ Done | Event Engine (Virtual Fence, Loitering, Line Crossing) |
 | **Phase 4** | ✅ Done | Risk + Incident Intelligence |
 | **Phase 5** | ✅ Done | Vehicle Intelligence + ANPR |
-| Phase 6 | ⏳ | Night-time Performance |
-| Phase 7 | ⏳ | TensorRT / ONNX Optimization |
-| Phase 8 | ⏳ | DeepStream / GStreamer Migration |
+| **Phase 6** | ✅ Done | Night-time Performance (CLAHE + NightActivityEngine) |
+| **Phase 7** | ✅ Done | ONNX Optimization (ONNXDetector + benchmark scripts) |
+| **Phase 8** | ✅ Done | Multi-Camera + GStreamer Pipeline Abstraction Layer |
 | Phase 9 | ⏳ | Backend API + React Command Center |
 | Phase 10 | ⏳ | Hardening + Bug Testing |
 | Phase 11 | ⏳ | SIH Competition Demo Build |

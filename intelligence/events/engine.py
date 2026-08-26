@@ -1,17 +1,18 @@
 """
 intelligence.events.engine
 ----------------------------
-EventEngine — the main orchestrator for Phase 3.
+EventEngine — the main orchestrator for Phases 3–6.
 
-Composes VirtualFenceEngine, LineCrossingEngine, and LoiteringEngine into a
-single interface that the EdgeProcessor calls once per inference step.
+Composes VirtualFenceEngine, LineCrossingEngine, LoiteringEngine, and
+NightActivityEngine into a single interface that the EdgeProcessor calls
+once per inference step.
 
 Responsibilities:
     - Initialize all sub-engines from YAML config.
     - Call each sub-engine's update() with the current tracked detections.
     - Collect and return all events fired in the current frame.
     - Provide draw() to annotate all zones/lines on a video frame.
-    - Log events using structed logging (not print statements).
+    - Log events using structured logging (not print statements).
 
 Config structure (from YAML):
     event_engine:
@@ -19,6 +20,10 @@ Config structure (from YAML):
       zones: [...]                  # see virtual_fence.py
       lines: [...]                  # see line_crossing.py
       loitering_zones: [...]        # see loitering.py
+      night_activity:               # see night_activity.py (Phase 6)
+        enabled: true
+        night_start_hour: 20
+        night_end_hour: 6
 """
 
 from __future__ import annotations
@@ -32,6 +37,7 @@ from cv.detection.base import Detection
 from intelligence.events.base import SurveillanceEvent
 from intelligence.events.line_crossing import LineCrossingEngine
 from intelligence.events.loitering import LoiteringEngine
+from intelligence.events.night_activity import NightActivityEngine
 from intelligence.events.virtual_fence import VirtualFenceEngine
 
 logger = logging.getLogger(__name__)
@@ -39,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 class EventEngine:
     """
-    Orchestrates all event detection rules.
+    Orchestrates all event detection rules (Phases 3–6).
 
     Args:
         config:      Full YAML config dict. Reads from ``event_engine`` block.
@@ -54,15 +60,17 @@ class EventEngine:
         zones_cfg = ee_cfg.get("zones", [])
         lines_cfg = ee_cfg.get("lines", [])
         loiter_cfg = ee_cfg.get("loitering_zones", [])
+        night_cfg = ee_cfg.get("night_activity", {})
 
         self._fence: VirtualFenceEngine = VirtualFenceEngine(zones_cfg, camera_name)
         self._crossing: LineCrossingEngine = LineCrossingEngine(lines_cfg, camera_name)
         self._loitering: LoiteringEngine = LoiteringEngine(loiter_cfg, camera_name)
+        self._night: NightActivityEngine = NightActivityEngine(night_cfg, camera_name)
 
-        total_rules = len(zones_cfg) + len(lines_cfg) + len(loiter_cfg)
         logger.info(
-            "EventEngine initialised  camera=%s  zones=%d  lines=%d  loitering=%d",
+            "EventEngine initialised  camera=%s  zones=%d  lines=%d  loitering=%d  night=%s",
             camera_name, len(zones_cfg), len(lines_cfg), len(loiter_cfg),
+            bool(night_cfg.get("enabled", True)),
         )
 
     def update(self, detections: List[Detection]) -> List[SurveillanceEvent]:
@@ -82,15 +90,20 @@ class EventEngine:
         events.extend(self._fence.update(detections))
         events.extend(self._crossing.update(detections))
         events.extend(self._loitering.update(detections))
+        events.extend(self._night.update(detections))
 
         for ev in events:
             logger.info("EVENT  %s", ev)
 
         return events
 
+    def cleanup_stale_tracks(self, active_track_ids: set) -> None:
+        """Propagate stale-track cleanup to sub-engines that maintain per-track state."""
+        self._night.cleanup_stale_tracks(active_track_ids)
+
     def draw(self, frame: np.ndarray) -> None:
         """
-        Draw all zones and lines on the frame in-place.
+        Draw all zones, lines, and overlays on the frame in-place.
 
         Call this before displaying or saving the annotated frame.
         """
@@ -99,3 +112,4 @@ class EventEngine:
         self._fence.draw(frame)
         self._crossing.draw(frame)
         self._loitering.draw(frame)
+        self._night.draw(frame)

@@ -26,6 +26,10 @@ dev = [
     "pytest-cov",
     "ruff>=0.5",
 ]
+# Phase 7: ONNX Runtime backend (GPU-accelerated inference)
+onnx = [
+    "onnxruntime-gpu>=1.18",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["apps", "cv"]

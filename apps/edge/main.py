@@ -1,4 +1,4 @@
-"""
+﻿"""
 apps.edge.main
 ---------------
 CLI entry point for the IBVAP edge processing node (Laptop 1).
@@ -14,6 +14,11 @@ Arguments:
     --source     Override camera source URI (overrides config value)
     --no-display Run headless (no OpenCV window — for SSH / remote sessions)
     --log-level  Logging level: DEBUG, INFO, WARNING (default: INFO)
+
+Phase 7 note:
+    Set detector.backend: onnx in the YAML config to use the ONNX Runtime
+    backend instead of PyTorch. Requires models/onnx/yolov8n.onnx (see
+    scripts/export_onnx.py).
 """
 
 from __future__ import annotations
@@ -46,7 +51,7 @@ def _load_config(config_path: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="IBVAP Edge Processing Node — Phase 1: Single Camera Detection",
+        description="IBVAP Edge Processing Node",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -108,17 +113,24 @@ def main() -> None:
     # ---- Import after arg parsing so --help is fast ----
     from apps.edge.processor import EdgeProcessor
     from apps.edge.video_source import VideoSource
-    from cv.detection.yolo_detector import YOLODetector
 
-    # Build components
+    # ---- Select detector backend (Phase 7) ----
+    backend = det_cfg.get("backend", "pytorch").lower()
+    if backend == "onnx":
+        from cv.detection.onnx_detector import ONNXDetector
+        detector = ONNXDetector(config=config)
+        logger.info("Using ONNX detector backend.")
+    else:
+        from cv.detection.yolo_detector import YOLODetector
+        detector = YOLODetector(config=config)
+
+    # Build video source
     source = VideoSource(
         source_uri=source_uri,
         max_queue_size=max_queue_size,
         reconnect_delay_s=reconnect_delay,
         name=camera_name,
     )
-
-    detector = YOLODetector(config=config)
 
     # Load detector (may take a few seconds for GPU init)
     logger.info("Loading detector model...")

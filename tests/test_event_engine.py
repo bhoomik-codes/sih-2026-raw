@@ -235,6 +235,9 @@ class TestEventEngine:
                 "zones": zones or [],
                 "lines": lines or [],
                 "loitering_zones": loitering or [],
+                # Disable night_activity in integration tests so results are
+                # deterministic regardless of the time-of-day the test runs.
+                "night_activity": {"enabled": False},
             }
         }
 

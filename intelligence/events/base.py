@@ -23,6 +23,9 @@ class EventType(Enum):
     # Phase 5: ANPR
     VEHICLE_ANPR = auto()
 
+    # Phase 6: Night-time activity
+    NIGHT_MOVEMENT = auto()
+
 
 class EventSeverity(Enum):
     LOW = "low"

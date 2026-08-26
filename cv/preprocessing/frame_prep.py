@@ -108,14 +108,43 @@ def apply_roi(
     return masked
 
 
+def enhance_low_light(
+    frame: np.ndarray,
+    clip_limit: float = 2.0,
+    tile_grid_size: tuple = (8, 8),
+) -> np.ndarray:
+    """
+    Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to improve
+    visibility in dark / low-light scenes (Phase 6).
+
+    Operates on the luminance channel (YCrCb color space) to avoid colour
+    distortion. Only the luma channel is equalized; chrominance is preserved.
+
+    Args:
+        frame:          BGR uint8 numpy array (H, W, 3).
+        clip_limit:     CLAHE clip limit. Higher = more contrast. Default: 2.0.
+        tile_grid_size: CLAHE tile grid. Default: (8, 8).
+
+    Returns:
+        BGR uint8 numpy array with improved contrast.
+    """
+    ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
+    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
+    ycrcb[:, :, 0] = clahe.apply(ycrcb[:, :, 0])
+    return cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
+
+
 def build_preprocessing_pipeline(config: dict):
     """
     Factory: builds a callable that applies all configured preprocessing
     steps to a frame in the correct order.
 
     Config keys (from the YAML `preprocessing` block):
-        resize     (list[int] | null): [width, height]. Null = no resize.
+        resize      (list[int] | null): [width, height]. Null = no resize.
         roi_polygon (list[list] | null): Polygon as list of [x, y] pairs.
+        low_light   (bool)            : Enable CLAHE low-light enhancement (Phase 6).
+        clahe_clip  (float)           : CLAHE clip limit. Default: 2.0.
+        clahe_grid  (list[int])       : CLAHE tile grid [w, h]. Default: [8, 8].
 
     Returns:
         Callable[[np.ndarray], np.ndarray] — the preprocessing function.
@@ -136,7 +165,17 @@ def build_preprocessing_pipeline(config: dict):
     if raw_roi:
         roi_polygon = [tuple(pt) for pt in raw_roi]
 
+    # Phase 6: low-light enhancement
+    low_light: bool = bool(prep_cfg.get("low_light", False))
+    clahe_clip: float = float(prep_cfg.get("clahe_clip", 2.0))
+    raw_grid = prep_cfg.get("clahe_grid", [8, 8])
+    clahe_grid: tuple = (int(raw_grid[0]), int(raw_grid[1]))
+
     def preprocess(frame: np.ndarray) -> np.ndarray:
+        # Step 0 (Phase 6): Low-light CLAHE enhancement (before ROI / resize)
+        if low_light:
+            frame = enhance_low_light(frame, clip_limit=clahe_clip, tile_grid_size=clahe_grid)
+
         # Step 1: Apply ROI masking before resize so that the detector
         # input only contains the operator-defined zone.
         if roi_polygon:
@@ -149,8 +188,10 @@ def build_preprocessing_pipeline(config: dict):
         return frame
 
     logger.info(
-        "Preprocessing pipeline built  resize=%s  roi=%s",
+        "Preprocessing pipeline built  resize=%s  roi=%s  low_light=%s",
         resize_target,
         "yes" if roi_polygon else "no",
+        low_light,
     )
     return preprocess
+

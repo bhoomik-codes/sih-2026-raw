@@ -26,6 +26,7 @@ class RiskScorer:
             EventType.ZONE_EXIT: int(cfg.get("zone_exit", 0)),
             EventType.WRONG_DIRECTION: int(cfg.get("wrong_direction", 20)),
             EventType.VEHICLE_ANPR: int(cfg.get("vehicle_anpr", 0)),
+            EventType.NIGHT_MOVEMENT: int(cfg.get("night_movement", 20)),
         }
 
     def evaluate(self, events: List[SurveillanceEvent]) -> Tuple[int, EventSeverity]:
