@@ -36,6 +36,7 @@ from intelligence.events.base import SurveillanceEvent, EventType
 from intelligence.incidents.generator import IncidentGenerator
 from intelligence.incidents.base import Incident
 from intelligence.anpr.engine import ANPREngine
+from apps.edge.streamer import MJPEGStreamer
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,13 @@ class EdgeProcessor:
         self._output_video_path: Optional[str] = proc.get("output_video_path", None)
         self._metrics_print_every_n: int = int(proc.get("metrics_print_every_n", 30))
         self._window_name: str = f"IBVAP – {self._source.name}"
+        
+        # --- Streaming ---
+        stream_port = proc.get("stream_port")
+        if stream_port:
+            self._streamer = MJPEGStreamer(port=int(stream_port))
+        else:
+            self._streamer = None
 
         # --- Preprocessing pipeline ---
         self._preprocess = build_preprocessing_pipeline(config)
@@ -148,6 +156,9 @@ class EdgeProcessor:
 
         # Start the camera feed now that warmup is done
         self._source.start()
+        
+        if self._streamer:
+            self._streamer.start()
 
         try:
             self._loop()
@@ -251,9 +262,12 @@ class EdgeProcessor:
             if self._loop_frame_count % self._metrics_print_every_n == 0:
                 self._metrics.print_summary(m)
 
-            # --- Display ---
+            # --- Display / Streaming ---
             if self._display:
                 self._show(annotated, m)
+            elif self._streamer:
+                self._draw_hud(annotated, m.fps_rolling, m.num_detections, m.dropped_frames)
+                self._streamer.update_frame(annotated)
 
             # --- Save ---
             if self._save_annotated and self._output_video_path:
@@ -465,5 +479,8 @@ class EdgeProcessor:
 
         if self._display:
             cv2.destroyAllWindows()
+            
+        if self._streamer:
+            self._streamer.stop()
 
         logger.info("EdgeProcessor shut down cleanly.")

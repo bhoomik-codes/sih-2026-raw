@@ -1,4 +1,4 @@
-﻿"""
+"""
 apps.edge.main
 ---------------
 CLI entry point for the IBVAP edge processing node (Laptop 1).
@@ -70,6 +70,12 @@ def main() -> None:
         help="Run headless — disable OpenCV display window.",
     )
     parser.add_argument(
+        "--stream-port",
+        type=int,
+        default=None,
+        help="Port to serve the MJPEG stream on. If set, no-display is implied.",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -89,9 +95,13 @@ def main() -> None:
         config.setdefault("camera", {})["source"] = args.source
         logger.info("Source overridden from CLI: %s", args.source)
 
-    if args.no_display:
+    if args.no_display or args.stream_port:
         config.setdefault("output", {})["display"] = False
-        logger.info("Display disabled (--no-display).")
+        logger.info("Display disabled (headless or streaming mode).")
+        
+    if args.stream_port:
+        config.setdefault("processor", {})["stream_port"] = args.stream_port
+        logger.info("MJPEG Stream requested on port %d", args.stream_port)
 
     # Resolve camera config
     cam_cfg = config.get("camera", {})

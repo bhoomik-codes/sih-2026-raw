@@ -55,7 +55,7 @@ ibvap/
 │   │   ├── main.py     ← Single-camera entry point (pytorch or onnx backend)
 │   │   └── multi_main.py ← Multi-camera entry point (Phase 8)
 │   ├── backend/        ← ⏳ Phase 9 — FastAPI + WebSocket event broker
-│   └── dashboard/      ← ⏳ Phase 9 — React command center (Laptop 2)
+│   └── dashboard/      ← 🟢 Phase 9 — React command center (Laptop 2)
 │
 ├── cv/                 ← Computer vision modules (no business logic)
 │   ├── detection/      ← 🟢 DetectorBase + YOLODetector + ONNXDetector (Phase 7)
@@ -172,7 +172,23 @@ python benchmarks/phase7_benchmark.py
 python benchmarks/phase8_benchmark.py
 ```
 
-#### 6. Run tests
+#### 6. Run Backend & Dashboard (Phase 9)
+
+To run the full web application, you need to start both the FastAPI backend and the React frontend.
+
+**Start the Backend (Terminal 1):**
+```bash
+.\.venv\Scripts\python -m uvicorn apps.backend.main:app --host 0.0.0.0 --port 8000
+```
+
+**Start the Dashboard (Terminal 2):**
+```bash
+cd apps/dashboard
+npm install
+npm run dev
+```
+
+#### 7. Run tests
 
 ```bash
 pytest tests/ -v
@@ -181,20 +197,42 @@ pytest tests/ -v
 
 ---
 
-## Configuration
+## Configuration & Camera Setup
 
-Edit `configs/phase1_default.yaml`:
+Edit `configs/phase1_default.yaml` or use the **Dashboard UI (Camera Management)** to configure video sources. The platform supports multiple types of sources:
+
+### 1. RTSP IP Cameras
+The standard for CCTV cameras. You will need the camera's IP address, port (usually 554), username, password, and stream path.
+* **Format:** `rtsp://<user>:<pass>@<ip>:<port>/<stream_path>`
+* **Example:** `rtsp://admin:securepass123@192.168.1.50:554/cam/realmonitor?channel=1&subtype=0`
+
+### 2. Local Video Files (Pre-recorded)
+Useful for testing and benchmarking without a live camera.
+* **Format:** Absolute or relative path to the `.mp4`, `.avi`, or `.mkv` file.
+* **Example:** `data/videos/test_video.mp4`
+
+### 3. USB Webcams
+For testing directly from your laptop or connected USB cameras.
+* **Format:** Integer index of the device (0 is usually the built-in webcam).
+* **Example:** `0` (or `1`, `2`)
+
+### 4. HTTP / MJPEG Streams
+Often used by smartphone CCTV apps (like IP Webcam) or older IP cameras.
+* **Format:** `http://<ip>:<port>/<stream_path>`
+* **Example:** `http://192.168.1.100:8080/video`
 
 ```yaml
+# Example YAML Configuration
 camera:
-  source: "data/videos/test_video.mp4"   # or rtsp://...
+  source: "rtsp://admin:pass@192.168.1.50:554/stream"
+  name: "BOP-CAM-01"
 
 detector:
   model: "models/pytorch/yolov8n.pt"
-  device: "cuda:0"                        # RTX 4050
+  device: "cuda:0"
   conf_threshold: 0.40
   imgsz: 640
-  inference_every_n_frames: 3             # Effective ~10 FPS inference
+  inference_every_n_frames: 3
 ```
 
 ---
@@ -212,7 +250,7 @@ detector:
 | **Phase 6** | ✅ Done | Night-time Performance (CLAHE + NightActivityEngine) |
 | **Phase 7** | ✅ Done | ONNX Optimization (ONNXDetector + benchmark scripts) |
 | **Phase 8** | ✅ Done | Multi-Camera + GStreamer Pipeline Abstraction Layer |
-| Phase 9 | ⏳ | Backend API + React Command Center |
+| **Phase 9** | 🟢 Active | Backend API + React Command Center |
 | Phase 10 | ⏳ | Hardening + Bug Testing |
 | Phase 11 | ⏳ | SIH Competition Demo Build |
 

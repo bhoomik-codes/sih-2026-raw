@@ -21,6 +21,7 @@ import {
 import { LoadingState } from '../components/common/LoadingState';
 import { EmptyState } from '../components/common/EmptyState';
 import { ErrorState } from '../components/common/ErrorState';
+import { CameraConnectionWizard } from '../components/cameras/CameraConnectionWizard';
 
 interface CameraManagementPageProps {
   cameras: Camera[];
@@ -36,38 +37,18 @@ export const CameraManagementPage: React.FC<CameraManagementPageProps> = ({
   onRefresh,
 }) => {
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
-  const [formData, setFormData] = useState<CameraCreatePayload>({
-    camera_id: '',
-    name: '',
-    source_url: '',
-    source_type: 'rtsp',
-    inference_enabled: true,
-  });
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.camera_id || !formData.source_url) return;
-    setIsSubmitting(true);
+  const handleWizardSubmit = async (data: CameraCreatePayload) => {
     setActionError(null);
     try {
-      await createCamera(formData);
-      setActionSuccess(`Camera ${formData.camera_id} registered successfully.`);
+      await createCamera(data);
+      setActionSuccess(`Camera ${data.camera_id} registered successfully.`);
       setShowAddModal(false);
-      setFormData({
-        camera_id: '',
-        name: '',
-        source_url: '',
-        source_type: 'rtsp',
-        inference_enabled: true,
-      });
       onRefresh();
     } catch (err: any) {
-      setActionError(err.message || 'Failed to register camera');
-    } finally {
-      setIsSubmitting(false);
+      throw err;
     }
   };
 
@@ -251,101 +232,12 @@ export const CameraManagementPage: React.FC<CameraManagementPageProps> = ({
         )}
       </div>
 
-      {/* Add Camera Modal */}
+      {/* Add Camera Wizard */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-md w-full p-5 space-y-4 shadow-xl">
-            <h2 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-              Register New Camera
-            </h2>
-
-            <form onSubmit={handleCreate} className="space-y-3 text-xs font-mono">
-              <div>
-                <label className="block text-slate-400 mb-1">Camera ID (e.g. BOP-CAM-02)</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.camera_id}
-                  onChange={(e) => setFormData({ ...formData, camera_id: e.target.value })}
-                  placeholder="BOP-CAM-02"
-                  className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-slate-100 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1">Display Name</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Border Post North Gate"
-                  className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-slate-100 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1">Source URL / Path</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.source_url}
-                  onChange={(e) => setFormData({ ...formData, source_url: e.target.value })}
-                  placeholder="rtsp://192.168.1.50:554/stream or /data/videos/test.mp4"
-                  className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-slate-100 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-slate-400 mb-1">Source Type</label>
-                  <select
-                    value={formData.source_type}
-                    onChange={(e) =>
-                      setFormData({ ...formData, source_type: e.target.value as CameraSourceType })
-                    }
-                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-slate-100 focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="rtsp">RTSP IP Camera</option>
-                    <option value="http">HTTP Video / Smartphone</option>
-                    <option value="mjpeg">MJPEG Stream</option>
-                    <option value="file">Local Video File</option>
-                    <option value="webcam">USB Webcam</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center space-x-2 pt-5">
-                  <input
-                    type="checkbox"
-                    id="inf"
-                    checked={formData.inference_enabled}
-                    onChange={(e) => setFormData({ ...formData, inference_enabled: e.target.checked })}
-                    className="rounded bg-slate-950 border-slate-800 text-blue-600 focus:ring-0"
-                  />
-                  <label htmlFor="inf" className="text-slate-300 text-[11px]">
-                    Enable Edge AI
-                  </label>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-semibold disabled:opacity-50"
-                >
-                  {isSubmitting ? 'Registering...' : 'Register Camera'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <CameraConnectionWizard
+          onClose={() => setShowAddModal(false)}
+          onSubmit={handleWizardSubmit}
+        />
       )}
     </div>
   );
