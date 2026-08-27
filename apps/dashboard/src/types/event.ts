@@ -27,4 +27,14 @@ export interface SurveillanceEvent {
   capture_ts?: string;
   ingest_ts?: string;
   display_ts?: string;
+  // DB fields
+  id?: string;
+  event_code?: string;
+  event_ts?: string | number;
+  status?: string;
+  bbox_x1?: number;
+  bbox_y1?: number;
+  bbox_x2?: number;
+  bbox_y2?: number;
+  metadata?: Record<string, any>;
 }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useCameras } from './hooks/useCameras';
 import { useIncidents } from './hooks/useIncidents';
 import { useEvents } from './hooks/useEvents';
@@ -10,6 +10,8 @@ import { Header } from './components/layout/Header';
 import { DashboardPage, NavigationTabs } from './components/layout/NavigationTabs';
 import { MobileAwarenessView } from './components/layout/MobileAwarenessView';
 import { IncidentDetailModal } from './components/incidents/IncidentDetailModal';
+import { ToastContainer, usePushIncidentToast } from './components/common/AlertToast';
+
 
 import { CommandCenterPage } from './pages/CommandCenterPage';
 import { CameraManagementPage } from './pages/CameraManagementPage';
@@ -60,12 +62,29 @@ export const App: React.FC = () => {
     handleNewMetrics,
   } = useMetrics();
 
+  // Toast push for incoming WebSocket incidents
+  const pushIncidentToast = usePushIncidentToast();
+
+  // WebSocket incident handler: update list + push toast
+  const handleNewIncidentWithToast = useCallback(
+    (inc: any) => {
+      handleNewIncident(inc);
+      // Only toast on OPEN incidents (not acknowledged or resolved)
+      const status = inc.status?.toUpperCase();
+      if (!status || status === 'OPEN') {
+        pushIncidentToast(inc);
+      }
+    },
+    [handleNewIncident, pushIncidentToast]
+  );
+
   // Real WebSocket Hook
   const { isConnected: isWsConnected } = useWebSocket({
     onEvent: handleNewEvent,
-    onIncident: handleNewIncident,
+    onIncident: handleNewIncidentWithToast,
     onMetrics: handleNewMetrics,
   });
+
 
   // Health Monitoring
   const {
@@ -196,6 +215,9 @@ export const App: React.FC = () => {
           onAcknowledge={acknowledge}
         />
       )}
+
+      {/* Global Alert Toast Container — always mounted at root */}
+      <ToastContainer />
     </div>
   );
 };

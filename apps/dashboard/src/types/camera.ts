@@ -1,5 +1,5 @@
 export type CameraStatus = 'ONLINE' | 'OFFLINE' | 'CONNECTING' | 'ERROR';
-export type CameraSourceType = 'rtsp' | 'http' | 'mjpeg' | 'file' | 'webcam';
+export type CameraSourceType = 'rtsp' | 'http' | 'mjpeg' | 'file' | 'webcam' | 'usb';
 
 export interface CameraLocation {
   lat: number | null;

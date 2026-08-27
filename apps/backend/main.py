@@ -10,6 +10,9 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import db
+
+
 # Load Config
 CONFIG_PATH = Path("configs/backend_default.yaml")
 if CONFIG_PATH.exists():
@@ -129,10 +132,20 @@ async def stop_camera(camera_id: str):
 @app.get("/api/health")
 async def get_health():
     # Health endpoint can always work, returning real backend state
+    db_status = "offline"
+    if db.db_enabled():
+        try:
+            # Simple ping to Supabase
+            db.get_db().table("cameras").select("count", count="exact").limit(1).execute()
+            db_status = "online"
+        except Exception as e:
+            db_status = f"error: {e}"
+            
     return {
         "status": "healthy",
         "edge_node": "online" if len(processes) > 0 else "offline",
-        "database": "online" if config.get("database", {}).get("enabled") else "offline",
+        "database": db_status,
+        "database_provider": "supabase" if db.db_enabled() else "none",
         "cpu_usage": 0,
         "memory_usage": 0,
         "gpu_usage": 0,
@@ -156,20 +169,33 @@ async def get_metrics():
 
 @app.get("/api/incidents")
 async def get_incidents():
+    if db.db_enabled():
+        try:
+            # Query the unified incidents table and join incident_events
+            res = db.get_db().table("incidents").select(
+                "*, incident_events(event_id, contribution_score, is_primary, events(*))"
+            ).order('created_at', desc=True).execute()
+            return res.data
+        except Exception as e:
+            print(f"[Supabase DB] get_incidents error: {e}")
+            
     if config.get("mock", {}).get("mock_alerts"):
         return [] # Return mock array if mock is enabled
     
-    if not config.get("database", {}).get("enabled"):
-        raise HTTPException(status_code=501, detail="Incident database not connected. Enable 'mock_alerts' in config or implement DB integration.")
     return []
 
 @app.get("/api/events")
 async def get_events():
+    if db.db_enabled():
+        try:
+            res = db.get_db().table("events").select("*").order('event_ts', desc=True).limit(50).execute()
+            return res.data
+        except Exception as e:
+            print(f"[Supabase DB] get_events error: {e}")
+            
     if config.get("mock", {}).get("mock_alerts"):
         return [] # Return mock array if mock is enabled
         
-    if not config.get("database", {}).get("enabled"):
-        raise HTTPException(status_code=501, detail="Event database not connected. Enable 'mock_alerts' in config or implement DB integration.")
     return []
 
 @app.websocket("/ws")
@@ -195,17 +221,32 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Generate mock events if any camera is online
                 any_online = any(c.status == "ONLINE" for c in cameras.values())
                 if any_online:
+                    event_data = {
+                        "event_id": f"EVT-{uuid.uuid4().hex[:6]}",
+                        "camera_id": list(cameras.keys())[0],
+                        "event_type": "virtual_fence_crossing",
+                        "track_id": int(time.time() % 100),
+                        "severity": "medium",
+                        "rule_name": "zone:border_fence",
+                        "timestamp": time.time()
+                    }
+                    
+                    if db.db_enabled():
+                        try:
+                            # Try to save to DB (will fail if schema mismatch but it's just mock)
+                            db.get_db().table("events").insert({
+                                "event_code": event_data["event_id"],
+                                "event_type": "ZONE_ENTRY",
+                                "severity": "MEDIUM",
+                                "track_id": event_data["track_id"],
+                                "camera_id": event_data["camera_id"]
+                            }).execute()
+                        except Exception as e:
+                            print(f"[Supabase DB] save_event error: {e}")
+
                     event = {
                         "type": "event",
-                        "data": {
-                            "event_id": f"EVT-{uuid.uuid4().hex[:6]}",
-                            "camera_id": list(cameras.keys())[0],
-                            "event_type": "virtual_fence_crossing",
-                            "track_id": int(time.time() % 100),
-                            "severity": "medium",
-                            "rule_name": "zone:border_fence",
-                            "timestamp": time.time()
-                        }
+                        "data": event_data
                     }
                     for connection in active_connections:
                         await connection.send_text(json.dumps(event))
