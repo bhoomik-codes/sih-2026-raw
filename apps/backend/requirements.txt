@@ -3,3 +3,8 @@ uvicorn
 websockets
 pydantic
 pyyaml
+python-dotenv
+psycopg2-binary
+sqlalchemy
+asyncpg
+supabase

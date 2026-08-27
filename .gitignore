@@ -54,7 +54,9 @@ Thumbs.db
 
 # Environment files
 .env
-.env.local
+.env.*
+!.env.example
+!.env.*.example
 
 # Node / Frontend
 node_modules/
