@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import warnings
 from collections import defaultdict, deque
-from typing import Deque, Dict, List, Optional, Tuple
+from typing import Deque, Dict, List, Tuple
 
 import numpy as np
 
@@ -58,6 +58,8 @@ class ByteTracker(TrackerBase):
         self._trajectories: Dict[int, Deque[Tuple[float, float]]] = defaultdict(
             lambda: deque(maxlen=self._max_traj_len)
         )
+        # Track ID -> last frame_id seen, used for garbage collection
+        self._track_last_seen: Dict[int, int] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -114,6 +116,7 @@ class ByteTracker(TrackerBase):
             # Update trajectory with bottom-center point
             bc = bbox.bottom_center
             self._trajectories[t_id].append(bc)
+            self._track_last_seen[t_id] = frame_id
 
             det = Detection(
                 bbox=bbox,
@@ -127,13 +130,17 @@ class ByteTracker(TrackerBase):
             )
             results.append(det)
 
-        # Prune trajectories for tracks that no longer appear
-        active_ids = {d.track_id for d in results}
-        stale = [tid for tid in self._trajectories if tid not in active_ids]
-        for tid in stale:
-            # Don't delete immediately — the track may return from occlusion
-            # We let the deque max-length handle trimming naturally
-            pass
+        # Prune trajectories for tracks that have been lost beyond max_lost_frames
+        # (Allows temporary occlusions up to track_buffer * 2 frames, then reclaims memory)
+        max_lost_frames = max(60, self._track_buffer * 2)
+        stale_tids = [
+            tid
+            for tid, last_f in self._track_last_seen.items()
+            if (frame_id - last_f) > max_lost_frames
+        ]
+        for tid in stale_tids:
+            self._trajectories.pop(tid, None)
+            self._track_last_seen.pop(tid, None)
 
         return results
 
@@ -141,6 +148,7 @@ class ByteTracker(TrackerBase):
         """Reset tracker and all trajectory histories."""
         self._tracker = self._build_tracker()
         self._trajectories.clear()
+        self._track_last_seen.clear()
 
     # ------------------------------------------------------------------
     # Private helpers

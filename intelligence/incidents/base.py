@@ -30,6 +30,7 @@ class Incident:
         camera_name:       The camera where this occurred.
         description:       A human-readable summary of what happened.
     """
+
     incident_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     track_id: int = -1
     risk_score: int = 0
@@ -38,6 +39,10 @@ class Incident:
     timestamp: float = field(default_factory=time.time)
     camera_name: str = ""
     description: str = ""
+
+    @property
+    def summary(self) -> str:
+        return self.description or self.__repr__()
 
     def __repr__(self) -> str:
         ts = time.strftime("%H:%M:%S", time.localtime(self.timestamp))

@@ -1,58 +1,70 @@
-# apps/dashboard — Command & Control Center (Laptop 2)
+# apps/dashboard — Tactical Command Center UI (Laptop 2)
 
-> **Phase:** 9 — not yet implemented  
-> **Hardware target:** Laptop 2 — Intel i5-1334U · Intel Iris Xe (no CUDA required)
+> **Status:** Production Ready (Phase 9 & 10 Complete)  
+> **Hardware target:** Laptop 2 — Intel i5-1334U · Intel Iris Xe (runs in browser, no GPU required)
 
-The dashboard is the operator-facing interface. It runs in a browser on Laptop 2 and
-connects to the backend WebSocket for live event streaming.
+The Command Center is an operator-facing, tactical web dashboard built with React 18, TypeScript, TailwindCSS, and Vite. It connects to the FastAPI backend over WebSockets and REST for live surveillance, real-time alert notifications, explainability insights, and camera administration.
 
-## Planned Responsibilities
+---
 
-```
-apps/backend (WebSocket)
-       ↓
-   Live Camera Feeds
-   - MJPEG streams from edge node
-   - Annotated overlays (bounding boxes, track IDs)
-         ↓
-   Active Incidents Panel
-   - Real-time alert cards
-   - Risk score + contributing events
-   - "Why did this alert fire?" explainability breakdown
-         ↓
-   Map View (Leaflet.js)
-   - Camera locations on a map
-   - Zone/fence overlays
-   - Incident pins with severity colour
-         ↓
-   Incident Timeline
-   - Chronological event log
-   - Filterable by camera, severity, type
-         ↓
-   System Health Monitor
-   - GPU utilization, VRAM, temperature
-   - Per-camera FPS and status
-   - Dropped frame rate
-   - Edge node connection status
-         ↓
-   Admin Controls
-   - Define/edit virtual fence polygons per camera
-   - Configure alert thresholds
-   - Camera on/off
+## 🌟 Key Features
+
+* **Multi-Camera Matrix:** Live MJPEG video stream grid with tactical HUD overlays, FPS counters, and AI bounding boxes.
+* **Instant Incident Toasts:** Non-blocking audiovisual toast notifications for high-priority security breaches.
+* **Incident Center & Explainability Modal:**
+  * Animated SVG **Risk Score Gauge** (0–100).
+  * Contributing events breakdown with weight scores (Zone Entry, Perimeter Crossing, Loitering, ANPR Watchlist).
+  * One-click **Acknowledge Incident** workflow.
+* **Camera Management:** Wizard to add, configure, start, and stop RTSP streams, local MP4 files, USB webcams, and mobile video feeds.
+* **System Health:** Live CPU, memory, edge node connectivity, and database telemetry.
+
+---
+
+## ⚡ Running the Dashboard
+
+```bash
+cd apps/dashboard
+
+# Install Node.js dependencies
+npm install
+
+# Start local development server (port 5173)
+npm run dev
+
+# Build production bundle
+npm run build
 ```
 
-## Planned Technology
+Open [http://localhost:5173](http://localhost:5173) in your browser.
+
+---
+
+## 🛠️ Architecture & Modules
 
 ```
-React (Vite)
-Leaflet.js — interactive map
-WebSocket client (native browser API)
-Recharts or Chart.js — metric graphs
-Tailwind CSS or custom CSS
+src/
+├── api/                  # Axios/fetch REST clients for backend endpoints
+│   ├── cameras.ts        # GET/POST /api/cameras, start/stop streams
+│   ├── events.ts         # GET /api/events
+│   ├── incidents.ts      # GET /api/incidents, acknowledge
+│   └── metrics.ts        # GET /api/metrics & /api/health
+│
+├── components/
+│   ├── cameras/          # LiveStream HUD, CameraGrid, CameraConnectionWizard
+│   ├── incidents/        # ActiveIncidentsList, IncidentCard, IncidentDetailModal
+│   ├── events/           # EventTimeline, EventFilterDrawer
+│   ├── common/           # AlertToast, SeverityBadge, LoadingState, EmptyState
+│   └── layout/           # Header, NavigationTabs, MobileAwarenessView
+│
+├── hooks/                # Custom React hooks (useCameras, useIncidents, useHealth, etc.)
+├── pages/                # CommandCenterPage, CameraManagementPage, IncidentCenterPage, etc.
+└── websocket/            # Resilient auto-reconnecting WebSocket client (useWebSocket)
 ```
 
-## Mock Data Mode
+---
 
-During early development (before backend is ready), the dashboard should have
-a **mock mode** that replays pre-recorded event JSON fixtures so UI can be
-built and iterated independently of the AI pipeline.
+## 🔄 Proxy & Environment Configuration
+
+Vite proxies `/api` and `/ws` requests to `http://localhost:8000` automatically:
+* Check [vite.config.ts](file:///Users/apple/sih-2026-raw/apps/dashboard/vite.config.ts) for proxy rules.
+* Check [.env](file:///Users/apple/sih-2026-raw/apps/dashboard/.env) for local environment overrides.

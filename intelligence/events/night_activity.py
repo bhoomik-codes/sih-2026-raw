@@ -1,4 +1,4 @@
-﻿"""
+"""
 intelligence.events.night_activity
 -------------------------------------
 Night-time activity detection (Phase 6).
@@ -139,6 +139,7 @@ class NightActivityEngine:
             return
         import cv2
         import numpy as np  # noqa: F401 (used via frame.shape)
+
         h, w = frame.shape[:2]
         # Draw a subtle night indicator in the top-right corner
         label = "[ NIGHT MODE ]"
@@ -147,6 +148,12 @@ class NightActivityEngine:
         y = 24
         cv2.rectangle(frame, (x - 4, y - th - bl - 4), (x + tw + 4, y + 4), (30, 0, 60), cv2.FILLED)
         cv2.putText(
-            frame, label, (x, y - bl),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 150, 255), 1, cv2.LINE_AA
+            frame,
+            label,
+            (x, y - bl),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (200, 150, 255),
+            1,
+            cv2.LINE_AA,
         )

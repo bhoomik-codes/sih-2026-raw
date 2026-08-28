@@ -1,4 +1,5 @@
 """tests/test_onnx_detector.py — Unit tests for ONNXDetector (Phase 7)."""
+
 from __future__ import annotations
 
 import time
@@ -10,10 +11,10 @@ import pytest
 from cv.detection.base import Detection
 from cv.detection.onnx_detector import ONNXDetector
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_config(model: str = "models/onnx/yolov8n.onnx") -> dict:
     return {
@@ -42,6 +43,7 @@ def _make_mock_session():
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestONNXDetectorInit:
     def test_default_conf(self):
         det = ONNXDetector(_make_config())
@@ -61,8 +63,8 @@ class TestONNXDetectorInit:
 
     def test_class_filter_default(self):
         det = ONNXDetector(_make_config())
-        assert 0 in det._relevant_ids   # person
-        assert 2 in det._relevant_ids   # car
+        assert 0 in det._relevant_ids  # person
+        assert 2 in det._relevant_ids  # car
 
 
 class TestONNXDetectorLoad:
@@ -135,13 +137,13 @@ class TestONNXDetectorDetect:
         # Format: [cx, cy, w, h, score_cls0 (person), score_cls1..cls79]
         # Person at center of 640×640, 100×200 box, confidence 0.85
         preds = np.zeros((84, 1), dtype=np.float32)
-        preds[0, 0] = 320.0   # cx
-        preds[1, 0] = 240.0   # cy
-        preds[2, 0] = 100.0   # w
-        preds[3, 0] = 200.0   # h
-        preds[4, 0] = 0.85    # class 0 (person) confidence
+        preds[0, 0] = 320.0  # cx
+        preds[1, 0] = 240.0  # cy
+        preds[2, 0] = 100.0  # w
+        preds[3, 0] = 200.0  # h
+        preds[4, 0] = 0.85  # class 0 (person) confidence
         mock_session = _make_mock_session()
-        mock_session.run.return_value = [preds.T[np.newaxis, ...]]   # (1, 1, 84)
+        mock_session.run.return_value = [preds.T[np.newaxis, ...]]  # (1, 1, 84)
 
         # We need shape (1, 84, N) — fix:
         preds_reshaped = preds[np.newaxis, ...]  # (1, 84, 1)
@@ -177,11 +179,11 @@ class TestLetterbox:
         img = np.zeros((320, 640, 3), dtype=np.uint8)
         resized, scale, (px, py) = ONNXDetector._letterbox(img, 640)
         assert scale == pytest.approx(1.0)
-        assert py > 0   # vertical padding
+        assert py > 0  # vertical padding
 
     def test_output_is_always_target_size(self):
         """Output must always be exactly new_size × new_size."""
-        for (h, w) in [(480, 640), (720, 1280), (640, 480)]:
+        for h, w in [(480, 640), (720, 1280), (640, 480)]:
             img = np.zeros((h, w, 3), dtype=np.uint8)
             resized, _, _ = ONNXDetector._letterbox(img, 640)
             assert resized.shape == (640, 640, 3), f"Failed for {h}x{w}"

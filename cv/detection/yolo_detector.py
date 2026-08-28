@@ -74,7 +74,9 @@ class YOLODetector(DetectorBase):
         self._conf: float = float(det_cfg.get("conf_threshold", 0.40))
         self._iou: float = float(det_cfg.get("iou_threshold", 0.45))
         self._imgsz: int = int(det_cfg.get("imgsz", 640))
-        self._quantize: bool = bool(det_cfg.get("half", False))  # kept as 'half' in YAML for clarity
+        self._quantize: bool = bool(
+            det_cfg.get("half", False)
+        )  # kept as 'half' in YAML for clarity
         self._verbose: bool = bool(det_cfg.get("verbose", False))
 
         # Class filter — override via config if needed
@@ -97,6 +99,15 @@ class YOLODetector(DetectorBase):
             raise RuntimeError(
                 "Ultralytics is not installed. Run: pip install ultralytics"
             ) from exc
+
+        import torch
+
+        if self._device.startswith("cuda") and not torch.cuda.is_available():
+            logger.warning(
+                "CUDA requested (%s) but not available. Falling back to available device.",
+                self._device,
+            )
+            self._device = "mps" if torch.backends.mps.is_available() else "cpu"
 
         logger.info("Loading YOLO model: %s → device=%s", self._model_path, self._device)
         self._model = YOLO(self._model_path, verbose=self._verbose)

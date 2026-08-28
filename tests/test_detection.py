@@ -26,7 +26,6 @@ import pytest
 
 from cv.detection.base import BBox, Detection, DetectorBase
 
-
 # ── BBox tests ────────────────────────────────────────────────────────────────
 
 
@@ -129,9 +128,11 @@ class TestDetectorBase:
 
     def test_concrete_must_implement_detect(self):
         """A subclass missing detect() should raise TypeError."""
+
         class BrokenDetector(DetectorBase):
             def load(self):
                 self._loaded = True
+
             # detect() intentionally omitted
 
         with pytest.raises(TypeError):
@@ -139,9 +140,11 @@ class TestDetectorBase:
 
     def test_concrete_must_implement_load(self):
         """A subclass missing load() should raise TypeError."""
+
         class BrokenDetector(DetectorBase):
             def detect(self, frame, frame_id=0) -> List[Detection]:
                 return []
+
             # load() intentionally omitted
 
         with pytest.raises(TypeError):
@@ -149,6 +152,7 @@ class TestDetectorBase:
 
     def test_minimal_concrete_subclass(self):
         """A properly implemented subclass should instantiate fine."""
+
         class MinimalDetector(DetectorBase):
             def load(self):
                 self._loaded = True
@@ -191,6 +195,7 @@ class TestYOLODetectorMocked:
 
     def _make_detector(self, conf: float = 0.40) -> object:
         from cv.detection.yolo_detector import YOLODetector
+
         cfg = {
             "detector": {
                 "model": "yolov8n.pt",
@@ -205,6 +210,7 @@ class TestYOLODetectorMocked:
     def _mock_yolo_result(self, detections):
         """Build a mock Ultralytics result object."""
         import torch
+
         mock_result = MagicMock()
         if not detections:
             mock_result.boxes = None
@@ -223,7 +229,6 @@ class TestYOLODetectorMocked:
 
     def test_output_is_list(self):
         """detect() must always return a list."""
-        from cv.detection.yolo_detector import YOLODetector
 
         det = self._make_detector()
 
@@ -240,7 +245,6 @@ class TestYOLODetectorMocked:
 
     def test_empty_frame_returns_empty_list(self):
         """detect() on empty frame must return [] without raising."""
-        from cv.detection.yolo_detector import YOLODetector
 
         det = self._make_detector()
         with patch("ultralytics.YOLO") as MockYOLO:
@@ -255,7 +259,6 @@ class TestYOLODetectorMocked:
 
     def test_detect_filters_irrelevant_classes(self):
         """Classes outside the relevant set must be filtered out."""
-        from cv.detection.yolo_detector import YOLODetector
         import torch
 
         det = self._make_detector()
@@ -281,7 +284,6 @@ class TestYOLODetectorMocked:
 
     def test_detect_before_load_raises(self):
         """detect() called before load() must raise RuntimeError."""
-        from cv.detection.yolo_detector import YOLODetector
 
         det = self._make_detector()
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -291,7 +293,6 @@ class TestYOLODetectorMocked:
 
     def test_100_frames_no_exception(self):
         """Run 100 frames through detect() without any exception."""
-        from cv.detection.yolo_detector import YOLODetector
 
         det = self._make_detector()
         with patch("ultralytics.YOLO") as MockYOLO:
@@ -307,7 +308,6 @@ class TestYOLODetectorMocked:
 
     def test_person_detection_returned(self):
         """A person detection must appear in the output with correct fields."""
-        from cv.detection.yolo_detector import YOLODetector
         import torch
 
         det = self._make_detector(conf=0.0)
@@ -317,7 +317,7 @@ class TestYOLODetectorMocked:
 
             mock_result = MagicMock()
             person_box = MagicMock()
-            person_box.cls = torch.tensor([0.0])   # class_id=0 (person)
+            person_box.cls = torch.tensor([0.0])  # class_id=0 (person)
             person_box.conf = torch.tensor([0.87])
             person_box.xyxy = torch.tensor([[50.0, 60.0, 200.0, 400.0]])
             mock_result.boxes = [person_box]

@@ -22,7 +22,6 @@ Config structure (from YAML):
 
 from __future__ import annotations
 
-import time
 from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
@@ -62,15 +61,13 @@ class _CrossingLine:
         self.name = name
         self.start = start
         self.end = end
-        self.classes = classes      # None = all
+        self.classes = classes  # None = all
         self.direction = direction  # "any", "AB", "BA"
         self.severity = severity
         # Last known side per track_id: +1 (left/A) or -1 (right/B)
         self._last_side: Dict[int, float] = {}
 
-    def check(
-        self, det: Detection, camera_name: str
-    ) -> Optional[SurveillanceEvent]:
+    def check(self, det: Detection, camera_name: str) -> Optional[SurveillanceEvent]:
         if det.track_id is None:
             return None
         if self.classes is not None and det.class_name not in self.classes:
@@ -84,7 +81,7 @@ class _CrossingLine:
         self._last_side[tid] = side
 
         if prev is None:
-            return None   # First time we see this track
+            return None  # First time we see this track
 
         # Crossing detected when sign changes
         crossed = (prev > 0 and side < 0) or (prev < 0 and side > 0)
@@ -94,7 +91,7 @@ class _CrossingLine:
         # Determine direction
         crossing_dir = "AB" if (prev > 0 and side < 0) else "BA"
         if self.direction != "any" and self.direction != crossing_dir:
-            return None   # Filtered by direction requirement
+            return None  # Filtered by direction requirement
 
         return SurveillanceEvent(
             event_type=EventType.LINE_CROSSING,
@@ -114,6 +111,12 @@ class _CrossingLine:
                 "to_side": "B" if side < 0 else "A",
             },
         )
+
+    def cleanup_stale_tracks(self, active_track_ids: set) -> None:
+        """Prune tracks no longer active from side tracking memory."""
+        stale_tids = [tid for tid in list(self._last_side.keys()) if tid not in active_track_ids]
+        for tid in stale_tids:
+            self._last_side.pop(tid, None)
 
 
 class LineCrossingEngine:
@@ -135,9 +138,7 @@ class LineCrossingEngine:
             classes = set(lc["classes"]) if lc.get("classes") else None
             direction = lc.get("direction", "any")
             severity = EventSeverity[lc.get("severity", "critical").upper()]
-            self._lines.append(
-                _CrossingLine(lc["name"], start, end, classes, direction, severity)
-            )
+            self._lines.append(_CrossingLine(lc["name"], start, end, classes, direction, severity))
 
     def update(self, detections: List[Detection]) -> List[SurveillanceEvent]:
         """Check all detections against all lines. Returns any crossing events."""
@@ -149,9 +150,15 @@ class LineCrossingEngine:
                     events.append(event)
         return events
 
+    def cleanup_stale_tracks(self, active_track_ids: set) -> None:
+        """Prune stale tracks across all lines."""
+        for line in self._lines:
+            line.cleanup_stale_tracks(active_track_ids)
+
     def draw(self, frame: "np.ndarray") -> None:
         """Draw crossing lines on the frame in-place."""
         import cv2
+
         for line in self._lines:
             p1 = (int(line.start[0]), int(line.start[1]))
             p2 = (int(line.end[0]), int(line.end[1]))
@@ -160,6 +167,12 @@ class LineCrossingEngine:
             # Arrow indicating direction A→B
             mid = ((p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2)
             cv2.putText(
-                frame, f"{line.name}", (mid[0] + 5, mid[1] - 5),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, colour, 1, cv2.LINE_AA
+                frame,
+                f"{line.name}",
+                (mid[0] + 5, mid[1] - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                colour,
+                1,
+                cv2.LINE_AA,
             )

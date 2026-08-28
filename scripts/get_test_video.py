@@ -50,8 +50,7 @@ def try_download(url: str, output: str) -> bool:
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=30) as resp, \
-             open(output, "wb") as f:
+        with urllib.request.urlopen(req, timeout=30) as resp, open(output, "wb") as f:
             total = int(resp.headers.get("Content-Length", 0))
             block = 8192
             downloaded = 0
@@ -76,14 +75,24 @@ def try_download(url: str, output: str) -> bool:
 def try_yt_dlp(output: str) -> bool:
     """Try yt-dlp with a suitable outdoor scene."""
     import subprocess
+
     YT_URL = "https://www.youtube.com/watch?v=MNn9qKG2UFI"
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "yt_dlp",
-             "-f", "bestvideo[ext=mp4][height<=480]+bestaudio/best[ext=mp4][height<=480]",
-             "--merge-output-format", "mp4",
-             "-o", output, YT_URL],
-            capture_output=True, timeout=120,
+            [
+                sys.executable,
+                "-m",
+                "yt_dlp",
+                "-f",
+                "bestvideo[ext=mp4][height<=480]+bestaudio/best[ext=mp4][height<=480]",
+                "--merge-output-format",
+                "mp4",
+                "-o",
+                output,
+                YT_URL,
+            ],
+            capture_output=True,
+            timeout=120,
         )
         return result.returncode == 0 and os.path.exists(output)
     except Exception:
@@ -153,8 +162,8 @@ MANUAL OPTIONS (choose one):
 
 
 def _done() -> None:
-    print(f"\nReady. Run the edge node with:")
-    print(f"  .venv\\Scripts\\python.exe -m apps.edge.main --config configs/phase1_default.yaml")
+    print("\nReady. Run the edge node with:")
+    print("  .venv\\Scripts\\python.exe -m apps.edge.main --config configs/phase1_default.yaml")
 
 
 if __name__ == "__main__":

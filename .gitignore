@@ -16,6 +16,8 @@ venv/
 env/
 
 # Model weights — large binary files, store separately
+*.pt
+*.pth
 models/pytorch/*.pt
 models/pytorch/*.pth
 models/onnx/*.onnx
@@ -54,7 +56,9 @@ Thumbs.db
 
 # Environment files
 .env
-.env.local
+.env.*
+!.env.example
+!.env.*.example
 
 # Node / Frontend
 node_modules/

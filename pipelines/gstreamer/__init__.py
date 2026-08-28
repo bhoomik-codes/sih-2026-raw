@@ -1,1 +1,1 @@
-﻿"""pipelines/gstreamer/__init__.py"""
+"""pipelines/gstreamer/__init__.py"""

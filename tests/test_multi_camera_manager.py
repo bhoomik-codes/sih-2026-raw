@@ -1,27 +1,27 @@
-﻿"""tests/test_multi_camera_manager.py — Unit tests for MultiCameraManager (Phase 8)."""
+"""tests/test_multi_camera_manager.py — Unit tests for MultiCameraManager (Phase 8)."""
+
 from __future__ import annotations
 
 import time
-from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apps.edge.video_source import Frame
 from apps.edge.multi_camera_manager import (
     CameraHealthRecord,
     MultiCameraManager,
-    _create_pipeline,
 )
+from apps.edge.video_source import Frame
 from pipelines.base import PipelineStatus
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_frame(frame_id: int = 1) -> Frame:
     import numpy as np
+
     return Frame(
         data=np.zeros((64, 64, 3), dtype="uint8"),
         frame_id=frame_id,
@@ -61,6 +61,7 @@ def _cameras_config():
 # CameraHealthRecord tests
 # ---------------------------------------------------------------------------
 
+
 class TestCameraHealthRecord:
     def test_initial_values(self):
         rec = CameraHealthRecord("CAM-01")
@@ -75,7 +76,7 @@ class TestCameraHealthRecord:
 
     def test_fps_estimate_after_frames(self):
         rec = CameraHealthRecord("CAM-01")
-        rec.started_at = time.time() - 5.0   # simulate 5 seconds elapsed
+        rec.started_at = time.time() - 5.0  # simulate 5 seconds elapsed
         rec.frames_received = 50
         assert rec.fps_estimate == pytest.approx(10.0, abs=1.0)
 
@@ -88,6 +89,7 @@ class TestCameraHealthRecord:
 # MultiCameraManager tests
 # ---------------------------------------------------------------------------
 
+
 class TestMultiCameraManager:
     def _manager_with_mocks(self):
         """Create a MultiCameraManager with mocked pipelines."""
@@ -96,6 +98,7 @@ class TestMultiCameraManager:
         manager._pipelines = {}
         manager._health = {}
         import threading
+
         manager._lock = threading.Lock()
 
         for cam in cfg:

@@ -1,4 +1,4 @@
-﻿"""
+"""
 scripts/export_tensorrt.py
 ---------------------------
 Export YOLOv8 to TensorRT FP16 engine (Phase 7 — optional).
@@ -82,9 +82,9 @@ def main() -> None:
         exported = model.export(
             format="engine",
             imgsz=args.imgsz,
-            half=True,         # FP16 for RTX 4050
-            device=0,          # GPU 0
-            workspace=4,       # 4 GB TRT workspace (keep within 6 GB VRAM budget)
+            half=True,  # FP16 for RTX 4050
+            device=0,  # GPU 0
+            workspace=4,  # 4 GB TRT workspace (keep within 6 GB VRAM budget)
             simplify=True,
         )
         logger.info("TensorRT engine exported: %s", exported)
@@ -94,6 +94,7 @@ def main() -> None:
         target = output_dir / exported_path.name
         if exported_path.resolve() != target.resolve():
             import shutil
+
             shutil.move(str(exported_path), str(target))
             logger.info("Moved to: %s", target)
 

@@ -1,1 +1,1 @@
-﻿"""pipelines/opencv/__init__.py"""
+"""pipelines/opencv/__init__.py"""

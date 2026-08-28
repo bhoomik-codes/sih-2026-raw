@@ -3,8 +3,9 @@ server:
   port: 8000
 
 database:
-  enabled: false
-  url: "sqlite:///./backend.db"
+  enabled: true
+  provider: "supabase"
+  url: "postgresql://postgres:***@db.***.supabase.co:5432/postgres"
 
 mock:
   mock_camera_state: false

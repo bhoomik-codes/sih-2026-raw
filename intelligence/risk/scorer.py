@@ -12,7 +12,7 @@ from intelligence.events.base import EventSeverity, EventType, SurveillanceEvent
 class RiskScorer:
     """
     Evaluates a list of events to produce a risk score and severity.
-    
+
     Default point values can be overridden via configuration.
     """
 
@@ -40,7 +40,7 @@ class RiskScorer:
             A tuple of (total_score, severity)
         """
         total_score = sum(self._point_map.get(e.event_type, 0) for e in events)
-        
+
         # Override severity if any event is critical (e.g. ANPR Match)
         if any(e.severity == EventSeverity.CRITICAL for e in events):
             return max(total_score, 100), EventSeverity.CRITICAL
