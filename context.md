@@ -2753,4 +2753,3 @@ Bug Fixes
 
 This document represents the current technical and strategic context for developing the SIH26187 prototype.
 Future work should treat this as the baseline architecture and modify it only when supported by benchmarking, testing, or a clear improvement to the competition prototype.
-
