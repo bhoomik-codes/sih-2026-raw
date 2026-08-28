@@ -321,6 +321,7 @@ class EdgeProcessor:
             if self._loop_frame_count % self._metrics_print_every_n == 0:
                 self._metrics.print_summary(m)
                 if self._transmitter:
+                    ram_pct = (m.ram_used_mb / m.ram_total_mb * 100) if m.ram_total_mb else 0.0
                     self._transmitter.emit_metrics(
                         {
                             "camera_name": self._source.name,
@@ -329,6 +330,13 @@ class EdgeProcessor:
                             "end_to_end_latency_ms": m.end_to_end_latency_ms,
                             "num_detections": m.num_detections,
                             "dropped_frames": m.dropped_frames,
+                            "cpu_percent": m.cpu_percent,
+                            "ram_percent": ram_pct,
+                            "ram_used_mb": m.ram_used_mb,
+                            "gpu_utilization": m.gpu_utilization_pct or 0.0,
+                            "gpu_memory_used_mb": m.vram_used_mb or 0.0,
+                            "gpu_temperature_c": m.gpu_temp_celsius or 0.0,
+                            "active_cameras": 1,
                         }
                     )
                     self._transmitter.emit_heartbeat(
