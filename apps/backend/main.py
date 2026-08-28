@@ -3,17 +3,15 @@ import subprocess
 import time
 import json
 import uuid
-import sys
 import yaml
 from pathlib import Path
 from typing import Dict, List, Optional
-from contextlib import asynccontextmanager
-
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from apps.backend.db import db
+import db
+
 
 # Load Config
 CONFIG_PATH = Path("configs/backend_default.yaml")
@@ -22,34 +20,11 @@ if CONFIG_PATH.exists():
         config = yaml.safe_load(f)
 else:
     config = {
-        "database": {"enabled": True},
+        "database": {"enabled": False},
         "mock": {"mock_camera_state": False, "mock_charts": False, "mock_alerts": False}
     }
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Initialize Supabase DB connection
-    connected = await db.connect()
-    if connected:
-        # Preload cameras from DB into memory
-        try:
-            saved_cams = await db.get_cameras()
-            for cam_dict in saved_cams:
-                cam = Camera(**cam_dict)
-                cam.status = "OFFLINE"
-                cameras[cam.camera_id] = cam
-        except Exception as e:
-            print(f"[Supabase DB] Error loading existing cameras: {e}")
-    yield
-    # Shutdown
-    await db.disconnect()
-    for proc in processes.values():
-        if proc.poll() is None:
-            proc.terminate()
-
-
-app = FastAPI(title="IBVAP Backend", lifespan=lifespan)
+app = FastAPI(title="IBVAP Backend")
 
 app.add_middleware(
     CORSMiddleware,
@@ -59,11 +34,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 class CameraLocation(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
-
 
 class CameraCreatePayload(BaseModel):
     camera_id: str
@@ -73,11 +46,9 @@ class CameraCreatePayload(BaseModel):
     location: Optional[CameraLocation] = None
     inference_enabled: bool = True
 
-
 class Camera(CameraCreatePayload):
     status: str = "OFFLINE"
     stream_url: Optional[str] = None
-
 
 # In-memory store
 cameras: Dict[str, Camera] = {}
@@ -85,24 +56,9 @@ processes: Dict[str, subprocess.Popen] = {}
 active_connections: List[WebSocket] = []
 next_stream_port = 8081
 
-
 @app.get("/api/cameras", response_model=List[Camera])
 async def get_cameras():
-    if db.is_connected:
-        try:
-            db_cams = await db.get_cameras()
-            if db_cams:
-                # Merge runtime status with db data
-                for c in db_cams:
-                    cid = c["camera_id"]
-                    if cid in cameras:
-                        c["status"] = cameras[cid].status
-                        c["stream_url"] = cameras[cid].stream_url
-                return [Camera(**c) for c in db_cams]
-        except Exception as e:
-            print(f"[Supabase DB] get_cameras error: {e}")
     return list(cameras.values())
-
 
 @app.get("/api/cameras/{camera_id}", response_model=Camera)
 async def get_camera(camera_id: str):
@@ -110,20 +66,13 @@ async def get_camera(camera_id: str):
         raise HTTPException(status_code=404, detail="Camera not found")
     return cameras[camera_id]
 
-
 @app.post("/api/cameras", response_model=Camera)
 async def create_camera(payload: CameraCreatePayload):
     if payload.camera_id in cameras:
         raise HTTPException(status_code=400, detail="Camera already exists")
     cam = Camera(**payload.model_dump())
     cameras[payload.camera_id] = cam
-    if db.is_connected:
-        try:
-            await db.upsert_camera(cam.model_dump())
-        except Exception as e:
-            print(f"[Supabase DB] upsert_camera error: {e}")
     return cam
-
 
 @app.delete("/api/cameras/{camera_id}")
 async def delete_camera(camera_id: str):
@@ -133,13 +82,7 @@ async def delete_camera(camera_id: str):
         processes[camera_id].terminate()
         del processes[camera_id]
     del cameras[camera_id]
-    if db.is_connected:
-        try:
-            await db.delete_camera(camera_id)
-        except Exception as e:
-            print(f"[Supabase DB] delete_camera error: {e}")
     return {"success": True}
-
 
 @app.post("/api/cameras/{camera_id}/start")
 async def start_camera(camera_id: str):
@@ -155,7 +98,7 @@ async def start_camera(camera_id: str):
     next_stream_port += 1
 
     cmd = [
-        sys.executable,
+        ".\\.venv\\Scripts\\python.exe",
         "-m", "apps.edge.main",
         "--source", cam.source_url,
         "--stream-port", str(assigned_port)
@@ -166,15 +109,12 @@ async def start_camera(camera_id: str):
         processes[camera_id] = proc
         cam.status = "ONLINE"
         cam.stream_url = f"http://localhost:{assigned_port}/stream"
-        if db.is_connected:
-            await db.upsert_camera(cam.model_dump())
     except Exception as e:
         cam.status = "ERROR"
         cam.stream_url = None
         raise HTTPException(status_code=500, detail=str(e))
         
     return {"success": True}
-
 
 @app.post("/api/cameras/{camera_id}/stop")
 async def stop_camera(camera_id: str):
@@ -187,25 +127,30 @@ async def stop_camera(camera_id: str):
         del processes[camera_id]
     
     cam.status = "OFFLINE"
-    if db.is_connected:
-        await db.upsert_camera(cam.model_dump())
     return {"success": True}
-
 
 @app.get("/api/health")
 async def get_health():
-    db_health = await db.check_health()
+    # Health endpoint can always work, returning real backend state
+    db_status = "offline"
+    if db.db_enabled():
+        try:
+            # Simple ping to Supabase
+            db.get_db().table("cameras").select("count", count="exact").limit(1).execute()
+            db_status = "online"
+        except Exception as e:
+            db_status = f"error: {e}"
+            
     return {
         "status": "healthy",
         "edge_node": "online" if len(processes) > 0 else "offline",
-        "database": db_health.get("status", "offline"),
-        "database_provider": "supabase",
+        "database": db_status,
+        "database_provider": "supabase" if db.db_enabled() else "none",
         "cpu_usage": 0,
         "memory_usage": 0,
         "gpu_usage": 0,
         "uptime_seconds": 0
     }
-
 
 @app.get("/api/metrics")
 async def get_metrics():
@@ -217,54 +162,55 @@ async def get_metrics():
             "system_health": "Optimal"
         }
     
-    # Return metrics based on active state / database
-    return {
-        "active_cameras": sum(1 for c in cameras.values() if c.status == "ONLINE"),
-        "total_detections_today": 0,
-        "active_incidents": 0,
-        "system_health": "Optimal" if db.is_connected else "Degraded"
-    }
-
+    if not config.get("database", {}).get("enabled"):
+        raise HTTPException(status_code=501, detail="Metrics database not connected. Enable 'mock_charts' in config or implement DB integration.")
+    
+    return {}
 
 @app.get("/api/incidents")
 async def get_incidents():
-    if db.is_connected:
+    if db.db_enabled():
         try:
-            return await db.get_incidents()
+            # Query the unified incidents table and join incident_events
+            res = db.get_db().table("incidents").select(
+                "*, incident_events(event_id, contribution_score, is_primary, events(*))"
+            ).order('created_at', desc=True).execute()
+            return res.data
         except Exception as e:
             print(f"[Supabase DB] get_incidents error: {e}")
             
     if config.get("mock", {}).get("mock_alerts"):
-        return []
+        return [] # Return mock array if mock is enabled
     
     return []
 
-
 @app.get("/api/events")
 async def get_events():
-    if db.is_connected:
+    if db.db_enabled():
         try:
-            return await db.get_events()
+            res = db.get_db().table("events").select("*").order('event_ts', desc=True).limit(50).execute()
+            return res.data
         except Exception as e:
             print(f"[Supabase DB] get_events error: {e}")
             
     if config.get("mock", {}).get("mock_alerts"):
-        return []
+        return [] # Return mock array if mock is enabled
         
     return []
-
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     active_connections.append(websocket)
     
+    # Check if mock alerts are enabled
     mock_alerts = config.get("mock", {}).get("mock_alerts")
     
     if not mock_alerts:
+        # If no mock data, just send a system message
         await websocket.send_text(json.dumps({
             "type": "system",
-            "message": "WebSocket connected to IBVAP Backend & Supabase."
+            "message": "WebSocket connected. Real-time edge node event integration is pending. Enable 'mock_alerts' in backend config for simulated data."
         }))
         
     try:
@@ -272,6 +218,7 @@ async def websocket_endpoint(websocket: WebSocket):
             await asyncio.sleep(2.0)
             
             if mock_alerts:
+                # Generate mock events if any camera is online
                 any_online = any(c.status == "ONLINE" for c in cameras.values())
                 if any_online:
                     event_data = {
@@ -283,8 +230,20 @@ async def websocket_endpoint(websocket: WebSocket):
                         "rule_name": "zone:border_fence",
                         "timestamp": time.time()
                     }
-                    if db.is_connected:
-                        await db.save_event(event_data)
+                    
+                    if db.db_enabled():
+                        try:
+                            # Try to save to DB (will fail if schema mismatch but it's just mock)
+                            db.get_db().table("events").insert({
+                                "event_code": event_data["event_id"],
+                                "event_type": "ZONE_ENTRY",
+                                "severity": "MEDIUM",
+                                "track_id": event_data["track_id"],
+                                "camera_id": event_data["camera_id"]
+                            }).execute()
+                        except Exception as e:
+                            print(f"[Supabase DB] save_event error: {e}")
+
                     event = {
                         "type": "event",
                         "data": event_data
@@ -293,5 +252,4 @@ async def websocket_endpoint(websocket: WebSocket):
                         await connection.send_text(json.dumps(event))
                         
     except WebSocketDisconnect:
-        if websocket in active_connections:
-            active_connections.remove(websocket)
+        active_connections.remove(websocket)

@@ -2,6 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { Incident } from '../types/incident';
 import { getIncidents, acknowledgeIncident as apiAcknowledge } from '../api/incidents';
 
+/** Returns the canonical ID for an incident (new DB shape uses `id`, WS uses `incident_id`) */
+function getIncidentKey(incident: Incident): string {
+  return incident.id || incident.incident_id || '';
+}
+
 export function useIncidents() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
@@ -28,11 +33,12 @@ export function useIncidents() {
   }, [fetchIncidents]);
 
   const handleNewIncident = useCallback((newInc: Incident) => {
+    const newKey = getIncidentKey(newInc);
     setIncidents((prev) => {
-      // Deduplicate if already present
-      const exists = prev.some((i) => i.incident_id === newInc.incident_id);
+      // Deduplicate by either id or incident_id
+      const exists = prev.some((i) => getIncidentKey(i) === newKey);
       if (exists) {
-        return prev.map((i) => (i.incident_id === newInc.incident_id ? newInc : i));
+        return prev.map((i) => (getIncidentKey(i) === newKey ? newInc : i));
       }
       return [newInc, ...prev];
     });
@@ -42,11 +48,19 @@ export function useIncidents() {
     setIsAcknowledging(true);
     try {
       const updated = await apiAcknowledge(id);
+      const now = new Date().toISOString();
+
       setIncidents((prev) =>
-        prev.map((i) => (i.incident_id === id ? { ...i, status: 'acknowledged', acknowledged_at: Date.now() } : i))
+        prev.map((i) =>
+          getIncidentKey(i) === id
+            ? { ...i, status: 'ACKNOWLEDGED', acknowledged_at: now }
+            : i
+        )
       );
-      if (selectedIncident?.incident_id === id) {
-        setSelectedIncident((prev) => (prev ? { ...prev, status: 'acknowledged', acknowledged_at: Date.now() } : null));
+      if (selectedIncident && getIncidentKey(selectedIncident) === id) {
+        setSelectedIncident((prev) =>
+          prev ? { ...prev, status: 'ACKNOWLEDGED', acknowledged_at: now } : null
+        );
       }
       return updated;
     } catch (err: any) {
@@ -56,9 +70,14 @@ export function useIncidents() {
     }
   }, [selectedIncident]);
 
+  const activeIncidents = incidents.filter((i) => {
+    const status = i.status?.toUpperCase();
+    return status !== 'RESOLVED' && status !== 'FALSE_POSITIVE' && status !== 'DISMISSED' && status !== 'FALSE_ALARM';
+  });
+
   return {
     incidents,
-    activeIncidents: incidents.filter((i) => i.status !== 'resolved' && i.status !== 'false_alarm'),
+    activeIncidents,
     selectedIncident,
     setSelectedIncident,
     isLoading,
