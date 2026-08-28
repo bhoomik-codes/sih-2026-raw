@@ -4,7 +4,7 @@ websockets
 pydantic
 pyyaml
 python-dotenv
-psycopg2-binary
+supabase
 sqlalchemy
 asyncpg
-supabase
+psycopg2-binary

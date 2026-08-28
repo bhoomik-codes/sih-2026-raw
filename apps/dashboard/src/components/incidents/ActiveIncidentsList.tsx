@@ -60,7 +60,7 @@ export const ActiveIncidentsList: React.FC<ActiveIncidentsListProps> = ({
         ) : (
           incidents.map((incident) => (
             <IncidentCard
-              key={incident.incident_id}
+              key={incident.id || incident.incident_id}
               incident={incident}
               onSelect={onSelectIncident}
             />
