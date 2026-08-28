@@ -506,6 +506,48 @@ async def websocket_endpoint(websocket: WebSocket):
                     sender=websocket,
                 )
 
+                if db.db_enabled():
+                    try:
+                        import datetime
+                        ts_val = data.get("timestamp", time.time())
+                        iso_ts = datetime.datetime.fromtimestamp(
+                            ts_val, tz=datetime.timezone.utc
+                        ).isoformat()
+                        
+                        # Ensure node exists to satisfy foreign key constraints
+                        try:
+                            db.get_db().table("nodes").upsert(
+                                {
+                                    "id": node_id,
+                                    "node_code": node_id,
+                                    "name": f"Edge Node {node_id}",
+                                    "node_type": "edge",
+                                    "status": "ONLINE",
+                                    "last_heartbeat_at": iso_ts
+                                }
+                            ).execute()
+                        except Exception:
+                            pass
+                        
+                        # Insert system_metrics
+                        db.get_db().table("system_metrics").insert(
+                            {
+                                "id": f"met_{uuid.uuid4().hex[:16]}",
+                                "node_id": node_id,
+                                "timestamp": iso_ts,
+                                "cpu_percent": float(data.get("cpu_percent", 0.0) or 0.0),
+                                "ram_percent": float(data.get("ram_percent", 0.0) or 0.0),
+                                "ram_used_mb": float(data.get("ram_used_mb", 0.0) or 0.0),
+                                "gpu_utilization": float(data.get("gpu_utilization", 0.0) or 0.0),
+                                "gpu_memory_used_mb": float(data.get("gpu_memory_used_mb", 0.0) or 0.0),
+                                "gpu_temperature_c": float(data.get("gpu_temperature_c", 0.0) or 0.0),
+                                "inference_fps": float(data.get("inference_fps", 0.0) or 0.0),
+                                "active_cameras": int(data.get("active_cameras", 0) or 0),
+                            }
+                        ).execute()
+                    except Exception as db_err:
+                        print(f"[Supabase DB] save_metrics error: {db_err}")
+
     except WebSocketDisconnect:
         if websocket in active_connections:
             active_connections.remove(websocket)
