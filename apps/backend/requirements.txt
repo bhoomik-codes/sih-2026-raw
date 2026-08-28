@@ -8,3 +8,6 @@ supabase
 sqlalchemy
 asyncpg
 psycopg2-binary
+alembic
+pg8000
+websocket-client

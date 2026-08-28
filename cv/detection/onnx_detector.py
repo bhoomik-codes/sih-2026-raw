@@ -1,4 +1,4 @@
-﻿"""
+"""
 cv.detection.onnx_detector
 ----------------------------
 ONNX Runtime detector implementation (Phase 7).
@@ -152,9 +152,9 @@ class ONNXDetector(DetectorBase):
         # --- Preprocess ---
         blob, scale, (pad_x, pad_y) = self._letterbox(frame, self._imgsz)
         # HWC BGR → CHW RGB → float32 / 255
-        blob = blob[:, :, ::-1].transpose(2, 0, 1)          # BGR→RGB, HWC→CHW
+        blob = blob[:, :, ::-1].transpose(2, 0, 1)  # BGR→RGB, HWC→CHW
         blob = np.ascontiguousarray(blob, dtype=np.float32) / 255.0
-        blob = blob[np.newaxis, ...]                          # add batch dim
+        blob = blob[np.newaxis, ...]  # add batch dim
 
         # --- Inference ---
         try:
@@ -168,7 +168,7 @@ class ONNXDetector(DetectorBase):
 
         # --- Postprocess ---
         # YOLOv8 ONNX output shape: (1, 84, N) — [cx, cy, w, h, cls0..cls79]
-        preds = outputs[0][0].T    # (N, 84)
+        preds = outputs[0][0].T  # (N, 84)
         return self._postprocess(preds, orig_w, orig_h, scale, pad_x, pad_y, frame_id)
 
     # ------------------------------------------------------------------
@@ -223,15 +223,12 @@ class ONNXDetector(DetectorBase):
             return []
 
         # Scores for each class
-        class_scores = preds[:, 4:]      # (N, 80)
-        class_ids = np.argmax(class_scores, axis=1)   # (N,)
+        class_scores = preds[:, 4:]  # (N, 80)
+        class_ids = np.argmax(class_scores, axis=1)  # (N,)
         confidences = class_scores[np.arange(len(class_scores)), class_ids]
 
         # Filter by relevance and confidence
-        mask = (
-            np.isin(class_ids, list(self._relevant_ids)) &
-            (confidences >= self._conf)
-        )
+        mask = np.isin(class_ids, list(self._relevant_ids)) & (confidences >= self._conf)
         preds = preds[mask]
         class_ids = class_ids[mask]
         confidences = confidences[mask]
@@ -261,9 +258,7 @@ class ONNXDetector(DetectorBase):
         # Apply NMS
         boxes_xywh = np.stack([x1, y1, x2 - x1, y2 - y1], axis=1).tolist()
         confidences_list = confidences.tolist()
-        indices = cv2.dnn.NMSBoxes(
-            boxes_xywh, confidences_list, self._conf, self._iou
-        )
+        indices = cv2.dnn.NMSBoxes(boxes_xywh, confidences_list, self._conf, self._iou)
         if len(indices) == 0:
             return []
 

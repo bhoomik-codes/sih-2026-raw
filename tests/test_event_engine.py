@@ -11,22 +11,24 @@ Tests all three rule types:
 """
 
 import time
-import pytest
 
 from cv.detection.base import BBox, Detection
-from intelligence.events.base import EventSeverity, EventType, SurveillanceEvent
-from intelligence.events.virtual_fence import VirtualFenceEngine
+from intelligence.events.base import EventType
+from intelligence.events.engine import EventEngine
 from intelligence.events.line_crossing import LineCrossingEngine
 from intelligence.events.loitering import LoiteringEngine
-from intelligence.events.engine import EventEngine
-
+from intelligence.events.virtual_fence import VirtualFenceEngine
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def make_det(
-    x1: float, y1: float, x2: float, y2: float,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
     track_id: int = 1,
     class_name: str = "person",
     confidence: float = 0.9,
@@ -45,39 +47,45 @@ def make_det(
 
 
 # Square zone: (100,100) to (300,300)
-ZONE_CFG = [{
-    "name": "test_zone",
-    "polygon": [[100, 100], [300, 100], [300, 300], [100, 300]],
-    "classes": ["person"],
-    "severity": "high",
-}]
+ZONE_CFG = [
+    {
+        "name": "test_zone",
+        "polygon": [[100, 100], [300, 100], [300, 300], [100, 300]],
+        "classes": ["person"],
+        "severity": "high",
+    }
+]
 
 # Horizontal line at y=200, full width
-LINE_CFG = [{
-    "name": "test_line",
-    "start": [0, 200],
-    "end":   [500, 200],
-    "classes": None,
-    "direction": "any",
-    "severity": "critical",
-}]
+LINE_CFG = [
+    {
+        "name": "test_line",
+        "start": [0, 200],
+        "end": [500, 200],
+        "classes": None,
+        "direction": "any",
+        "severity": "critical",
+    }
+]
 
 # Loitering zone matching ZONE_CFG
-LOITER_CFG = [{
-    "name": "test_loiter",
-    "polygon": [[100, 100], [300, 100], [300, 300], [100, 300]],
-    "threshold_s": 3.0,
-    "classes": ["person"],
-    "severity": "medium",
-}]
+LOITER_CFG = [
+    {
+        "name": "test_loiter",
+        "polygon": [[100, 100], [300, 100], [300, 300], [100, 300]],
+        "threshold_s": 3.0,
+        "classes": ["person"],
+        "severity": "medium",
+    }
+]
 
 
 # ---------------------------------------------------------------------------
 # VirtualFenceEngine tests
 # ---------------------------------------------------------------------------
 
-class TestVirtualFence:
 
+class TestVirtualFence:
     def test_zone_entry_fires(self):
         engine = VirtualFenceEngine(ZONE_CFG, "CAM-01")
         # Person starts outside
@@ -103,7 +111,7 @@ class TestVirtualFence:
         engine = VirtualFenceEngine(ZONE_CFG, "CAM-01")
         det_in = make_det(100, 200, 120, 220, track_id=1)
         ev1 = engine.update([det_in])
-        ev2 = engine.update([det_in])   # Same position — still inside
+        ev2 = engine.update([det_in])  # Same position — still inside
         assert len(ev1) == 1
         assert len(ev2) == 0
 
@@ -118,8 +126,8 @@ class TestVirtualFence:
 # LineCrossingEngine tests
 # ---------------------------------------------------------------------------
 
-class TestLineCrossing:
 
+class TestLineCrossing:
     def test_crossing_fires_when_crossing_line(self):
         engine = LineCrossingEngine(LINE_CFG, "CAM-01")
         # Above the line (y < 200) — foot_y bottom is y2=190
@@ -166,8 +174,8 @@ class TestLineCrossing:
 # LoiteringEngine tests
 # ---------------------------------------------------------------------------
 
-class TestLoitering:
 
+class TestLoitering:
     def test_loitering_fires_after_threshold(self):
         engine = LoiteringEngine(LOITER_CFG, "CAM-01")
         now = time.time()
@@ -225,8 +233,8 @@ class TestLoitering:
 # EventEngine integration test
 # ---------------------------------------------------------------------------
 
-class TestEventEngine:
 
+class TestEventEngine:
     def _make_config(self, zones=None, lines=None, loitering=None):
         return {
             "camera": {"name": "TEST-CAM"},
@@ -238,11 +246,19 @@ class TestEventEngine:
                 # Disable night_activity in integration tests so results are
                 # deterministic regardless of the time-of-day the test runs.
                 "night_activity": {"enabled": False},
-            }
+            },
         }
 
     def test_event_engine_disabled(self):
-        config = {"camera": {"name": "TEST-CAM"}, "event_engine": {"enabled": False, "zones": ZONE_CFG, "lines": [], "loitering_zones": []}}
+        config = {
+            "camera": {"name": "TEST-CAM"},
+            "event_engine": {
+                "enabled": False,
+                "zones": ZONE_CFG,
+                "lines": [],
+                "loitering_zones": [],
+            },
+        }
         engine = EventEngine(config, "TEST-CAM")
         det = make_det(100, 200, 120, 220, track_id=1)
         events = engine.update([det])

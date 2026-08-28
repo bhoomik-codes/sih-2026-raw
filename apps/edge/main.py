@@ -98,7 +98,7 @@ def main() -> None:
     if args.no_display or args.stream_port:
         config.setdefault("output", {})["display"] = False
         logger.info("Display disabled (headless or streaming mode).")
-        
+
     if args.stream_port:
         config.setdefault("processor", {})["stream_port"] = args.stream_port
         logger.info("MJPEG Stream requested on port %d", args.stream_port)
@@ -117,7 +117,9 @@ def main() -> None:
 
     logger.info(
         "Starting edge node  source=%s  model=%s  device=%s",
-        source_uri, model_path, device,
+        source_uri,
+        model_path,
+        device,
     )
 
     # ---- Import after arg parsing so --help is fast ----
@@ -128,10 +130,12 @@ def main() -> None:
     backend = det_cfg.get("backend", "pytorch").lower()
     if backend == "onnx":
         from cv.detection.onnx_detector import ONNXDetector
+
         detector = ONNXDetector(config=config)
         logger.info("Using ONNX detector backend.")
     else:
         from cv.detection.yolo_detector import YOLODetector
+
         detector = YOLODetector(config=config)
 
     # Build video source

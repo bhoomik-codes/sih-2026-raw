@@ -16,6 +16,8 @@ venv/
 env/
 
 # Model weights — large binary files, store separately
+*.pt
+*.pth
 models/pytorch/*.pt
 models/pytorch/*.pth
 models/onnx/*.onnx

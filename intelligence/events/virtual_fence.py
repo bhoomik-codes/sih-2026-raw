@@ -21,8 +21,7 @@ Config structure (from YAML):
 
 from __future__ import annotations
 
-import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -41,15 +40,13 @@ class _Zone:
         severity: EventSeverity,
     ) -> None:
         self.name = name
-        self.polygon = polygon          # (N, 2) int32 pixel coords
-        self.classes = classes          # None = all classes
+        self.polygon = polygon  # (N, 2) int32 pixel coords
+        self.classes = classes  # None = all classes
         self.severity = severity
         # Tracks currently inside this zone
         self._inside: Set[int] = set()
 
-    def check(
-        self, det: Detection, camera_name: str
-    ) -> Optional[SurveillanceEvent]:
+    def check(self, det: Detection, camera_name: str) -> Optional[SurveillanceEvent]:
         """
         Check if det's foot-point triggers an entry/exit event.
 
@@ -100,6 +97,10 @@ class _Zone:
             )
         return None
 
+    def cleanup_stale_tracks(self, active_track_ids: set) -> None:
+        """Discard inactive tracks from inside set."""
+        self._inside = self._inside.intersection(active_track_ids)
+
 
 class VirtualFenceEngine:
     """
@@ -135,18 +136,30 @@ class VirtualFenceEngine:
                     events.append(event)
         return events
 
+    def cleanup_stale_tracks(self, active_track_ids: set) -> None:
+        """Prune tracks no longer active from zone entry memory."""
+        for zone in self._zones:
+            zone.cleanup_stale_tracks(active_track_ids)
+
     def draw(self, frame: "np.ndarray") -> None:
         """Draw zone polygons on the frame in-place (for visualization)."""
         import cv2
+
         for zone in self._zones:
-            colour = (0, 0, 220)   # Red for restricted zones
+            colour = (0, 0, 220)  # Red for restricted zones
             cv2.polylines(frame, [zone.polygon.reshape(-1, 1, 2)], True, colour, 2)
             # Label zone name at the centroid
             cx = int(zone.polygon[:, 0].mean())
             cy = int(zone.polygon[:, 1].mean())
             cv2.putText(
-                frame, zone.name, (cx - 10, cy),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, colour, 1, cv2.LINE_AA
+                frame,
+                zone.name,
+                (cx - 10, cy),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                colour,
+                1,
+                cv2.LINE_AA,
             )
 
 
@@ -162,5 +175,8 @@ def _point_in_polygon(point: Tuple[int, int], polygon: np.ndarray) -> bool:
         True if point is inside the polygon.
     """
     import cv2
-    result = cv2.pointPolygonTest(polygon.reshape(-1, 1, 2), (float(point[0]), float(point[1])), False)
+
+    result = cv2.pointPolygonTest(
+        polygon.reshape(-1, 1, 2), (float(point[0]), float(point[1])), False
+    )
     return result >= 0

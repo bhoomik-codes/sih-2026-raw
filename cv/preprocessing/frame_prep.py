@@ -67,7 +67,7 @@ def normalize_frame(frame: np.ndarray) -> np.ndarray:
     Returns:
         float32 numpy array in range [0.0, 1.0].
     """
-    return (frame.astype(np.float32) / 255.0)
+    return frame.astype(np.float32) / 255.0
 
 
 def apply_roi(
@@ -194,4 +194,3 @@ def build_preprocessing_pipeline(config: dict):
         low_light,
     )
     return preprocess
-

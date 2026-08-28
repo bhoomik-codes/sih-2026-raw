@@ -1,4 +1,4 @@
-﻿"""
+"""
 benchmarks/phase7_benchmark.py
 --------------------------------
 Phase 7 Optimization Benchmark — PyTorch vs ONNX backend comparison.
@@ -64,10 +64,11 @@ def _gpu_vram_mb() -> float:
     """Return current GPU VRAM usage in MB, or 0 if pynvml unavailable."""
     try:
         import pynvml
+
         pynvml.nvmlInit()
         handle = pynvml.nvmlDeviceGetHandleByIndex(0)
         info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-        return info.used / (1024 ** 2)
+        return info.used / (1024**2)
     except Exception:
         return 0.0
 
@@ -88,15 +89,18 @@ def benchmark_backend(
 
     if backend_name == "pytorch_fp32":
         from cv.detection.yolo_detector import YOLODetector
+
         detector = YOLODetector(config)
     elif backend_name == "pytorch_fp16":
         cfg = dict(config)
         cfg["detector"] = dict(config["detector"])
         cfg["detector"]["half"] = True
         from cv.detection.yolo_detector import YOLODetector
+
         detector = YOLODetector(cfg)
     elif backend_name == "onnx":
         from cv.detection.onnx_detector import ONNXDetector
+
         detector = ONNXDetector(config)
     else:
         raise ValueError(f"Unknown backend: {backend_name}")
@@ -150,7 +154,9 @@ def benchmark_backend(
     }
     logger.info(
         "Result: FPS=%.1f  lat=%.1f ms  VRAM=%.0f MB",
-        fps, avg_lat, result["vram_mb"],
+        fps,
+        avg_lat,
+        result["vram_mb"],
     )
     return result
 

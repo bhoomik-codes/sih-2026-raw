@@ -1,4 +1,4 @@
-﻿"""
+"""
 pipelines.gstreamer.pipeline
 -----------------------------
 GStreamer-based hardware-decode video pipeline (Phase 8).
@@ -40,7 +40,6 @@ import time
 from typing import Optional
 
 import cv2
-import numpy as np
 
 from apps.edge.video_source import Frame
 from pipelines.base import PipelineStatus, VideoPipelineBase
@@ -216,7 +215,5 @@ class GStreamerPipeline(VideoPipelineBase):
                 self._cap.release()
 
             if self._running:
-                logger.info(
-                    "[%s] Reconnecting in %.1fs.", self._camera_id, self._reconnect_delay
-                )
+                logger.info("[%s] Reconnecting in %.1fs.", self._camera_id, self._reconnect_delay)
                 time.sleep(self._reconnect_delay)

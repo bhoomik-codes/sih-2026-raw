@@ -1,4 +1,4 @@
-﻿"""
+"""
 benchmarks/phase8_benchmark.py
 --------------------------------
 Phase 8 Multi-Camera Benchmark — 1 camera vs 2 cameras concurrently.
@@ -58,10 +58,11 @@ def _load_frames(video_path: str, n_frames: int, imgsz: int) -> List[np.ndarray]
 def _gpu_vram_mb() -> float:
     try:
         import pynvml
+
         pynvml.nvmlInit()
         handle = pynvml.nvmlDeviceGetHandleByIndex(0)
         info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-        return info.used / (1024 ** 2)
+        return info.used / (1024**2)
     except Exception:
         return 0.0
 
@@ -69,6 +70,7 @@ def _gpu_vram_mb() -> float:
 def _cpu_percent() -> float:
     try:
         import psutil
+
         return psutil.cpu_percent(interval=None)
     except Exception:
         return 0.0
@@ -138,7 +140,7 @@ def benchmark_n_cameras(
     thread_results: Dict[str, dict] = {}
     threads = []
     for i in range(n_cameras):
-        cam_id = f"CAM-{i+1:02d}"
+        cam_id = f"CAM-{i + 1:02d}"
         t = threading.Thread(
             target=_run_camera_thread,
             args=(cam_id, frames, detector, thread_results),
@@ -207,7 +209,15 @@ def main() -> None:
     # Save
     output = Path(OUTPUT_CSV)
     output.parent.mkdir(parents=True, exist_ok=True)
-    fields = ["camera_id", "n_cameras", "n_frames", "fps", "latency_ms_avg", "vram_mb", "wall_time_s"]
+    fields = [
+        "camera_id",
+        "n_cameras",
+        "n_frames",
+        "fps",
+        "latency_ms_avg",
+        "vram_mb",
+        "wall_time_s",
+    ]
     with open(output, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()

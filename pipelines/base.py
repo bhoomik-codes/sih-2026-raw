@@ -1,4 +1,4 @@
-﻿"""
+"""
 pipelines.base
 ---------------
 Abstract base class for all video pipeline backends (Phase 8).
@@ -25,12 +25,13 @@ from apps.edge.video_source import Frame
 
 class PipelineStatus(Enum):
     """Lifecycle state of a video pipeline."""
-    IDLE = auto()           # Not yet started
-    STARTING = auto()       # Connection in progress
-    RUNNING = auto()        # Actively receiving frames
-    RECONNECTING = auto()   # Temporarily disconnected, retrying
-    STOPPED = auto()        # Cleanly shut down
-    ERROR = auto()          # Unrecoverable error
+
+    IDLE = auto()  # Not yet started
+    STARTING = auto()  # Connection in progress
+    RUNNING = auto()  # Actively receiving frames
+    RECONNECTING = auto()  # Temporarily disconnected, retrying
+    STOPPED = auto()  # Cleanly shut down
+    ERROR = auto()  # Unrecoverable error
 
 
 class VideoPipelineBase(ABC):
@@ -125,4 +126,6 @@ class VideoPipelineBase(ABC):
         return 0
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(camera_id={self._camera_id!r}, status={self._status.name})"
+        return (
+            f"{self.__class__.__name__}(camera_id={self._camera_id!r}, status={self._status.name})"
+        )

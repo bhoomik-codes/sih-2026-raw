@@ -27,26 +27,27 @@ import cv2
 import numpy as np
 
 from apps.edge.metrics import MetricsCollector
+from apps.edge.streamer import MJPEGStreamer
+from apps.edge.transmitter import EdgeTransmitter
 from apps.edge.video_source import Frame, VideoSource
 from cv.detection.base import Detection, DetectorBase
 from cv.preprocessing.frame_prep import build_preprocessing_pipeline
 from cv.tracking.byte_tracker import ByteTracker
-from intelligence.events.engine import EventEngine
-from intelligence.events.base import SurveillanceEvent, EventType
-from intelligence.incidents.generator import IncidentGenerator
-from intelligence.incidents.base import Incident
 from intelligence.anpr.engine import ANPREngine
-from apps.edge.streamer import MJPEGStreamer
+from intelligence.events.base import EventType, SurveillanceEvent
+from intelligence.events.engine import EventEngine
+from intelligence.incidents.base import Incident
+from intelligence.incidents.generator import IncidentGenerator
 
 logger = logging.getLogger(__name__)
 
 # Annotation colours per class — BGR format
 _CLASS_COLOURS: dict[str, tuple[int, int, int]] = {
-    "person":     (0, 255, 0),      # Green
-    "car":        (255, 165, 0),    # Orange
-    "motorcycle": (255, 0, 255),    # Magenta
-    "bus":        (0, 165, 255),    # Orange-ish
-    "truck":      (0, 0, 255),      # Red
+    "person": (0, 255, 0),  # Green
+    "car": (255, 165, 0),  # Orange
+    "motorcycle": (255, 0, 255),  # Magenta
+    "bus": (0, 165, 255),  # Orange-ish
+    "truck": (0, 0, 255),  # Red
 }
 _DEFAULT_COLOUR = (200, 200, 200)  # Grey for unknown classes
 
@@ -80,7 +81,7 @@ class EdgeProcessor:
         self._config = config
 
         # --- Tracker ---
-        tracker_type = config.get("tracker", {}).get("type", None)
+        tracker_type = config.get("tracker", {}).get("type", "bytetrack")
         if tracker_type == "bytetrack":
             self._tracker = ByteTracker(config)
         else:
@@ -106,7 +107,7 @@ class EdgeProcessor:
         self._output_video_path: Optional[str] = proc.get("output_video_path", None)
         self._metrics_print_every_n: int = int(proc.get("metrics_print_every_n", 30))
         self._window_name: str = f"IBVAP – {self._source.name}"
-        
+
         # --- Streaming ---
         stream_port = proc.get("stream_port")
         if stream_port:
@@ -120,6 +121,21 @@ class EdgeProcessor:
         # --- Metrics ---
         csv_path = config.get("output", {}).get("metrics_csv", None)
         self._metrics = MetricsCollector(csv_path=csv_path)
+
+        # --- Backend WebSocket Transmitter (Phase 9) ---
+        backend_ws_url = proc.get("backend_ws_url") or config.get("transmitter", {}).get(
+            "backend_ws_url", "ws://localhost:8000/ws"
+        )
+        enable_tx = proc.get(
+            "enable_transmitter", config.get("transmitter", {}).get("enabled", True)
+        )
+        if enable_tx:
+            self._transmitter: Optional[EdgeTransmitter] = EdgeTransmitter(
+                backend_url=backend_ws_url,
+                node_id=cam_name,
+            )
+        else:
+            self._transmitter = None
 
         # --- Internal state ---
         self._running: bool = False
@@ -156,9 +172,12 @@ class EdgeProcessor:
 
         # Start the camera feed now that warmup is done
         self._source.start()
-        
+
         if self._streamer:
             self._streamer.start()
+
+        if self._transmitter:
+            self._transmitter.start()
 
         try:
             self._loop()
@@ -204,19 +223,40 @@ class EdgeProcessor:
             t_inf_start = time.perf_counter()
 
             if self._loop_frame_count % self._inference_every_n == 0:
-                self._last_detections = self._detector.detect(
-                    processed, frame_id=frame.frame_id
-                )
+                self._last_detections = self._detector.detect(processed, frame_id=frame.frame_id)
                 # Run tracking if enabled, only on new detections
                 if self._tracker is not None:
                     self._last_detections = self._tracker.update(self._last_detections)
                 # Run event engine on tracked detections
                 self._last_events = self._event_engine.update(self._last_detections)
-                
+
                 # Run ANPR Engine
                 anpr_events = self._anpr_engine.update(frame.data, self._last_detections)
                 self._last_events.extend(anpr_events)
-                
+
+                # Transmit events to Command Center Backend
+                if self._transmitter and self._last_events:
+                    for ev in self._last_events:
+                        ev_dict = {
+                            "event_type": str(
+                                ev.event_type.name
+                                if hasattr(ev.event_type, "name")
+                                else ev.event_type
+                            ),
+                            "severity": str(
+                                ev.severity.name if hasattr(ev.severity, "name") else ev.severity
+                            ),
+                            "track_id": ev.track_id,
+                            "camera_name": ev.camera_name,
+                            "timestamp": ev.timestamp,
+                            "frame_id": ev.frame_id,
+                            "class_name": ev.class_name,
+                            "confidence": ev.confidence,
+                            "rule_name": ev.rule_name,
+                            "details": ev.details,
+                        }
+                        self._transmitter.emit_event(ev_dict)
+
                 # Run incident engine
                 new_incidents = self._incident_generator.update(self._last_events)
                 if new_incidents:
@@ -224,6 +264,25 @@ class EdgeProcessor:
                     self._active_incidents.extend(new_incidents)
                     if len(self._active_incidents) > 5:
                         self._active_incidents = self._active_incidents[-5:]
+
+                    if self._transmitter:
+                        for inc in new_incidents:
+                            inc_dict = {
+                                "incident_id": inc.incident_id,
+                                "incident_type": str(
+                                    getattr(inc, "incident_type", "BORDER_SECURITY_ALERT")
+                                ),
+                                "severity": str(
+                                    inc.severity.name
+                                    if hasattr(inc.severity, "name")
+                                    else inc.severity
+                                ),
+                                "risk_score": getattr(inc, "risk_score", 0.0),
+                                "summary": inc.summary,
+                                "camera_name": getattr(inc, "camera_name", self._source.name),
+                                "timestamp": getattr(inc, "timestamp", time.time()),
+                            }
+                            self._transmitter.emit_incident(inc_dict)
 
                 # Cleanup stale tracks from incident engine
                 active_tids = {d.track_id for d in self._last_detections if d.track_id is not None}
@@ -236,7 +295,7 @@ class EdgeProcessor:
             annotated = self._annotate(frame.data, self._last_detections)
             # Draw event zones/lines overlay
             self._event_engine.draw(annotated)
-            
+
             if self._active_incidents:
                 # If we have incidents, show them prominently instead of raw events
                 self._draw_incidents(annotated, self._active_incidents)
@@ -261,21 +320,37 @@ class EdgeProcessor:
 
             if self._loop_frame_count % self._metrics_print_every_n == 0:
                 self._metrics.print_summary(m)
+                if self._transmitter:
+                    self._transmitter.emit_metrics(
+                        {
+                            "camera_name": self._source.name,
+                            "fps": m.fps_rolling,
+                            "inference_latency_ms": m.inference_latency_ms,
+                            "end_to_end_latency_ms": m.end_to_end_latency_ms,
+                            "num_detections": m.num_detections,
+                            "dropped_frames": m.dropped_frames,
+                        }
+                    )
+                    self._transmitter.emit_heartbeat(
+                        camera_id=self._source.name,
+                        status="ONLINE",
+                        fps=m.fps_rolling,
+                    )
 
             # --- Display / Streaming ---
+            if self._streamer:
+                stream_frame = annotated.copy() if self._display else annotated
+                self._draw_hud(stream_frame, m.fps_rolling, m.num_detections, m.dropped_frames)
+                self._streamer.update_frame(stream_frame)
+
             if self._display:
                 self._show(annotated, m)
-            elif self._streamer:
-                self._draw_hud(annotated, m.fps_rolling, m.num_detections, m.dropped_frames)
-                self._streamer.update_frame(annotated)
 
             # --- Save ---
             if self._save_annotated and self._output_video_path:
                 self._write_frame(annotated)
 
-        logger.info(
-            "EdgeProcessor loop ended  total_frames=%d", self._loop_frame_count
-        )
+        logger.info("EdgeProcessor loop ended  total_frames=%d", self._loop_frame_count)
 
     # ------------------------------------------------------------------
     # Annotation
@@ -317,9 +392,7 @@ class EdgeProcessor:
                 label = f"#{det.track_id} {label}"
 
             # Label background
-            (lw, lh), baseline = cv2.getTextSize(
-                label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1
-            )
+            (lw, lh), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
             label_y1 = max(y1 - lh - baseline - 4, 0)
             cv2.rectangle(
                 out,
@@ -353,9 +426,9 @@ class EdgeProcessor:
 
         h, w = frame.shape[:2]
         _SEVERITY_COLOURS = {
-            "low":      (180, 180, 180),
-            "medium":   (0, 165, 255),
-            "high":     (0, 0, 255),
+            "low": (180, 180, 180),
+            "medium": (0, 165, 255),
+            "high": (0, 0, 255),
             "critical": (0, 0, 255),  # Flashing handled below
         }
 
@@ -363,25 +436,34 @@ class EdgeProcessor:
         # Draw up to 3 most recent incidents from bottom up
         for inc in reversed(incidents[-3:]):
             colour = _SEVERITY_COLOURS.get(inc.severity.value, (200, 200, 200))
-            
+
             # Make critical incidents flash
             if inc.severity.value == "critical":
                 # Flash every ~0.25 seconds
                 if int(time.time() * 4) % 2 == 0:
-                    colour = (255, 255, 255) # Flash white
+                    colour = (255, 255, 255)  # Flash white
 
             text = f"!!! INCIDENT: {inc.description} [Track #{inc.track_id}] !!!"
             (tw, th), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
-            
+
             # Red background for the text
-            cv2.rectangle(frame, (8, y - th - baseline - 4), (tw + 16, y + 4), (0, 0, 150), cv2.FILLED)
+            cv2.rectangle(
+                frame, (8, y - th - baseline - 4), (tw + 16, y + 4), (0, 0, 150), cv2.FILLED
+            )
             cv2.rectangle(frame, (8, y - th - baseline - 4), (tw + 16, y + 4), colour, 2)
-            cv2.putText(frame, text, (12, y - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour, 2, cv2.LINE_AA)
+            cv2.putText(
+                frame,
+                text,
+                (12, y - baseline),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                colour,
+                2,
+                cv2.LINE_AA,
+            )
             y -= th + baseline + 12
 
-    def _draw_events(
-        self, frame: np.ndarray, events: "List[SurveillanceEvent]"
-    ) -> None:
+    def _draw_events(self, frame: np.ndarray, events: "List[SurveillanceEvent]") -> None:
         """
         Draw active event alerts as a scrolling banner at the bottom of the frame.
         Each event is shown as a coloured pill with the event type and track ID.
@@ -394,20 +476,33 @@ class EdgeProcessor:
                 # Draw plate text above the vehicle bounding box
                 plate_text = ev.details.get("plate", "UNKNOWN")
                 x, y = int(ev.location[0]), int(ev.location[1]) - 40
-                
+
                 (tw, th), baseline = cv2.getTextSize(plate_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
-                cv2.rectangle(frame, (x, y - th - baseline - 4), (x + tw + 16, y + 4), (0, 0, 0), cv2.FILLED)
-                cv2.rectangle(frame, (x, y - th - baseline - 4), (x + tw + 16, y + 4), (0, 255, 0), 2)
-                cv2.putText(frame, plate_text, (x + 8, y - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+                cv2.rectangle(
+                    frame, (x, y - th - baseline - 4), (x + tw + 16, y + 4), (0, 0, 0), cv2.FILLED
+                )
+                cv2.rectangle(
+                    frame, (x, y - th - baseline - 4), (x + tw + 16, y + 4), (0, 255, 0), 2
+                )
+                cv2.putText(
+                    frame,
+                    plate_text,
+                    (x + 8, y - baseline),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 0),
+                    2,
+                    cv2.LINE_AA,
+                )
             elif ev.rule_name.startswith("zone:"):
                 pass
 
         h, w = frame.shape[:2]
         _SEVERITY_COLOURS = {
-            "low":      (180, 180, 180),
-            "medium":   (0, 165, 255),   # Orange
-            "high":     (0, 0, 255),     # Red
-            "critical": (0, 0, 200),     # Dark red + flash
+            "low": (180, 180, 180),
+            "medium": (0, 165, 255),  # Orange
+            "high": (0, 0, 255),  # Red
+            "critical": (0, 0, 200),  # Dark red + flash
         }
 
         y = h - 10
@@ -417,14 +512,23 @@ class EdgeProcessor:
             text = f"! {ev.event_type.name.replace('_', ' ')} | #{ev.track_id} | {ev.rule_name}"
             (tw, th), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
             # Background pill
-            cv2.rectangle(frame, (8, y - th - baseline - 2), (tw + 16, y + 2), (20, 20, 20), cv2.FILLED)
+            cv2.rectangle(
+                frame, (8, y - th - baseline - 2), (tw + 16, y + 2), (20, 20, 20), cv2.FILLED
+            )
             cv2.rectangle(frame, (8, y - th - baseline - 2), (tw + 16, y + 2), colour, 1)
-            cv2.putText(frame, text, (12, y - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.55, colour, 1, cv2.LINE_AA)
+            cv2.putText(
+                frame,
+                text,
+                (12, y - baseline),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                colour,
+                1,
+                cv2.LINE_AA,
+            )
             y -= th + baseline + 8
 
-    def _draw_hud(
-        self, frame: np.ndarray, fps: float, num_det: int, dropped: int
-    ) -> None:
+    def _draw_hud(self, frame: np.ndarray, fps: float, num_det: int, dropped: int) -> None:
         """Draw a semi-transparent HUD overlay on the frame (in-place)."""
         num_events = len(self._last_events)
         num_incidents = len(self._active_incidents)
@@ -439,8 +543,7 @@ class EdgeProcessor:
         y = 24
         for line in hud_lines:
             cv2.putText(
-                frame, line, (10, y),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA
+                frame, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA
             )
             y += 22
 
@@ -458,9 +561,7 @@ class EdgeProcessor:
         if self._video_writer is None:
             h, w = frame.shape[:2]
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            self._video_writer = cv2.VideoWriter(
-                self._output_video_path, fourcc, 20.0, (w, h)
-            )
+            self._video_writer = cv2.VideoWriter(self._output_video_path, fourcc, 20.0, (w, h))
             logger.info("VideoWriter opened: %s (%dx%d)", self._output_video_path, w, h)
         self._video_writer.write(frame)
 
@@ -479,8 +580,11 @@ class EdgeProcessor:
 
         if self._display:
             cv2.destroyAllWindows()
-            
+
         if self._streamer:
             self._streamer.stop()
+
+        if self._transmitter:
+            self._transmitter.stop()
 
         logger.info("EdgeProcessor shut down cleanly.")
