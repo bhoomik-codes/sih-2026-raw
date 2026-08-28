@@ -40,6 +40,7 @@ class MJPEGStreamer:
                     self.send_header("Age", "0")
                     self.send_header("Cache-Control", "no-cache, private")
                     self.send_header("Pragma", "no-cache")
+                    self.send_header("Access-Control-Allow-Origin", "*")
                     self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=FRAME")
                     self.end_headers()
                     try:

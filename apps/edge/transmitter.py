@@ -113,17 +113,26 @@ class EdgeTransmitter:
         }
         self._enqueue(payload)
 
-    def emit_heartbeat(self, camera_id: str, status: str = "ONLINE", fps: float = 0.0) -> None:
+    def emit_heartbeat(
+        self,
+        camera_id: str,
+        status: str = "ONLINE",
+        fps: float = 0.0,
+        stream_url: Optional[str] = None,
+    ) -> None:
         """Enqueue camera node heartbeat."""
+        data = {
+            "camera_id": camera_id,
+            "status": status,
+            "fps": fps,
+        }
+        if stream_url:
+            data["stream_url"] = stream_url
         payload = {
             "type": "edge_heartbeat",
             "node_id": self._node_id,
             "timestamp": time.time(),
-            "data": {
-                "camera_id": camera_id,
-                "status": status,
-                "fps": fps,
-            },
+            "data": data,
         }
         self._enqueue(payload)
 

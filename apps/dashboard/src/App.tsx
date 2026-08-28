@@ -8,7 +8,6 @@ import { useWebSocket } from './websocket/useWebSocket';
 
 import { Header } from './components/layout/Header';
 import { DashboardPage, NavigationTabs } from './components/layout/NavigationTabs';
-import { MobileAwarenessView } from './components/layout/MobileAwarenessView';
 import { IncidentDetailModal } from './components/incidents/IncidentDetailModal';
 import { ToastContainer, usePushIncidentToast } from './components/common/AlertToast';
 

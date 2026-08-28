@@ -18,6 +18,8 @@ dependencies = [
     "psutil>=6.0",
     "supervision>=0.24",
     "easyocr>=1.7.0",
+    "websocket-client>=1.8",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -30,9 +32,19 @@ dev = [
 onnx = [
     "onnxruntime-gpu>=1.18",
 ]
+backend = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "websockets>=12.0",
+    "pydantic>=2.0",
+    "supabase>=2.0",
+    "sqlalchemy>=2.0",
+    "pg8000>=1.31",
+    "alembic>=1.13",
+]
 
 [tool.hatch.build.targets.wheel]
-packages = ["apps", "cv"]
+packages = ["apps", "cv", "intelligence", "pipelines"]
 
 [project.scripts]
 ibvap-edge = "apps.edge.main:main"

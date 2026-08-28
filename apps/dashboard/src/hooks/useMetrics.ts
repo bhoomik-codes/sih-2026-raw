@@ -10,11 +10,12 @@ export function useMetrics() {
   const fetchMetrics = useCallback(async () => {
     try {
       const data = await getMetrics();
-      setMetrics(data);
-      setError(null);
-    } catch (err: any) {
-      setError(err.message || 'Metrics unavailable');
-      setMetrics(null);
+      if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+        setMetrics(data);
+        setError(null);
+      }
+    } catch {
+      // Keep last WebSocket/REST snapshot if the poll fails (e.g. empty demo mode)
     } finally {
       setIsLoading(false);
     }
@@ -22,7 +23,6 @@ export function useMetrics() {
 
   useEffect(() => {
     fetchMetrics();
-    // Poll metrics every 5 seconds if WebSocket is not streaming metrics
     const interval = setInterval(fetchMetrics, 5000);
     return () => clearInterval(interval);
   }, [fetchMetrics]);

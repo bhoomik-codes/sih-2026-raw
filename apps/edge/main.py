@@ -101,6 +101,7 @@ def main() -> None:
 
     if args.stream_port:
         config.setdefault("processor", {})["stream_port"] = args.stream_port
+        config.setdefault("processor", {})["display"] = False
         logger.info("MJPEG Stream requested on port %d", args.stream_port)
 
     # Resolve camera config
@@ -150,8 +151,8 @@ def main() -> None:
     logger.info("Loading detector model...")
     detector.load()
 
-    # Start video source
-    source.start()
+    # VideoSource is started inside EdgeProcessor.run() AFTER GPU warmup
+    # so short demo files are not consumed during model init.
 
     # Create and run processor
     processor = EdgeProcessor(

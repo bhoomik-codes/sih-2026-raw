@@ -20,6 +20,7 @@ Pipeline (per frame):
 from __future__ import annotations
 
 import logging
+import socket
 import time
 from typing import List, Optional
 
@@ -98,7 +99,8 @@ class EdgeProcessor:
         self._anpr_engine = ANPREngine(config, cam_name)
 
         # --- Processor settings ---
-        proc = config.get("processor", config.get("output", {}))
+        # Merge output + processor so CLI --stream-port does not hide output.display
+        proc = {**config.get("output", {}), **config.get("processor", {})}
         self._inference_every_n: int = int(
             config.get("detector", {}).get("inference_every_n_frames", 3)
         )
@@ -190,6 +192,21 @@ class EdgeProcessor:
         """Signal the inference loop to stop after the current frame."""
         self._running = False
 
+    def _lan_ipv4(self) -> str:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.connect(("8.8.8.8", 80))
+            ip = sock.getsockname()[0]
+            sock.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
+
+    def _advertised_stream_url(self) -> Optional[str]:
+        if not self._streamer:
+            return None
+        return f"http://{self._lan_ipv4()}:{self._streamer.port}/stream"
+
     # ------------------------------------------------------------------
     # Internal loop
     # ------------------------------------------------------------------
@@ -279,8 +296,30 @@ class EdgeProcessor:
                                 ),
                                 "risk_score": getattr(inc, "risk_score", 0.0),
                                 "summary": inc.summary,
+                                "description": getattr(inc, "description", inc.summary),
                                 "camera_name": getattr(inc, "camera_name", self._source.name),
+                                "camera_id": getattr(inc, "camera_name", self._source.name),
+                                "track_id": getattr(inc, "track_id", None),
+                                "status": "OPEN",
                                 "timestamp": getattr(inc, "timestamp", time.time()),
+                                "triggering_events": [
+                                    {
+                                        "event_type": str(
+                                            ev.event_type.name
+                                            if hasattr(ev.event_type, "name")
+                                            else ev.event_type
+                                        ),
+                                        "severity": str(
+                                            ev.severity.name
+                                            if hasattr(ev.severity, "name")
+                                            else ev.severity
+                                        ),
+                                        "rule_name": getattr(ev, "rule_name", ""),
+                                        "track_id": getattr(ev, "track_id", None),
+                                        "timestamp": getattr(ev, "timestamp", None),
+                                    }
+                                    for ev in getattr(inc, "triggering_events", []) or []
+                                ],
                             }
                             self._transmitter.emit_incident(inc_dict)
 
@@ -343,6 +382,7 @@ class EdgeProcessor:
                         camera_id=self._source.name,
                         status="ONLINE",
                         fps=m.fps_rolling,
+                        stream_url=self._advertised_stream_url(),
                     )
 
             # --- Display / Streaming ---

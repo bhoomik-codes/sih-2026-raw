@@ -13,12 +13,14 @@ cameras:
     pipeline: "opencv"            # Use "gstreamer" for hardware-decode path
     max_queue_size: 2
     reconnect_delay_s: 3.0
+    stream_port: 8081
   - id: "BOP-CAM-02"
     source: "data/videos/test_video.mp4"
     name: "Border West Fence"
     pipeline: "opencv"
     max_queue_size: 2
     reconnect_delay_s: 3.0
+    stream_port: 8082
 
 # --- Shared detector config (used by all cameras) ---
 detector:

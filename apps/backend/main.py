@@ -1,15 +1,18 @@
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 try:
@@ -34,7 +37,7 @@ app = FastAPI(title="IBVAP Backend")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -59,13 +62,59 @@ class Camera(CameraCreatePayload):
     stream_url: Optional[str] = None
 
 
-from fastapi.responses import RedirectResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
+# In-memory runtime state (must exist before any request handler runs)
+cameras: Dict[str, Camera] = {}
+processes: Dict[str, subprocess.Popen] = {}
+active_connections: List[WebSocket] = []
+next_stream_port = int(os.getenv("EDGE_STREAM_PORT_START", "8081"))
+_START_TIME = time.time()
+_latest_metrics: Dict[str, Any] = {}
+_in_memory_events: List[Dict[str, Any]] = []
+_in_memory_incidents: List[Dict[str, Any]] = []
+_MEMORY_CAP = 200
 
 # Mount static video directory if exists
 VIDEOS_DIR = Path("data/videos")
 if VIDEOS_DIR.exists():
     app.mount("/api/videos/files", StaticFiles(directory=str(VIDEOS_DIR)), name="videos")
+
+
+def _remember(store: List[Dict[str, Any]], item: Dict[str, Any]) -> None:
+    store.insert(0, item)
+    del store[_MEMORY_CAP:]
+
+
+def _normalize_metrics(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Map edge telemetry field names to the dashboard SystemMetrics shape."""
+    fps = data.get("inference_fps") or data.get("fps") or 0.0
+    return {
+        "fps": fps,
+        "inference_fps": fps,
+        "inference_latency_ms": data.get("inference_latency_ms"),
+        "preprocess_latency_ms": data.get("preprocess_latency_ms"),
+        "total_latency_ms": data.get("end_to_end_latency_ms") or data.get("total_latency_ms"),
+        "queue_depth": data.get("queue_depth"),
+        "dropped_frames": data.get("dropped_frames"),
+        "dropped_ratio": data.get("dropped_ratio"),
+        "processed_frames": data.get("processed_frames") or data.get("num_detections"),
+        "gpu_utilization_pct": data.get("gpu_utilization") or data.get("gpu_utilization_pct") or 0.0,
+        "vram_used_mb": data.get("gpu_memory_used_mb") or data.get("vram_used_mb"),
+        "vram_total_mb": data.get("vram_total_mb"),
+        "gpu_temp_c": data.get("gpu_temperature_c") or data.get("gpu_temp_c"),
+        "cpu_utilization_pct": data.get("cpu_percent") or data.get("cpu_utilization_pct") or 0.0,
+        "ram_used_mb": data.get("ram_used_mb"),
+        "ram_total_mb": data.get("ram_total_mb"),
+        "ram_percent": data.get("ram_percent"),
+        "detector_status": data.get("detector_status", "Active"),
+        "tracker_status": data.get("tracker_status", "Active (ByteTrack)"),
+        "timestamp": data.get("timestamp", time.time()),
+        "camera_name": data.get("camera_name"),
+        "active_cameras": data.get("active_cameras", 0),
+    }
+
+
+def _incident_key(inc: Dict[str, Any]) -> str:
+    return str(inc.get("incident_id") or inc.get("id") or inc.get("incident_code") or "")
 
 
 def _ensure_default_camera():
@@ -212,44 +261,54 @@ async def stop_camera(camera_id: str):
 
 @app.get("/api/health")
 async def get_health():
-    # Health endpoint can always work, returning real backend state
     db_status = "offline"
     if db.db_enabled():
         try:
-            # Simple ping to Supabase
             db.get_db().table("cameras").select("count", count="exact").limit(1).execute()
             db_status = "online"
         except Exception as e:
             db_status = f"error: {e}"
 
+    cpu_usage = 0.0
+    memory_usage = 0.0
+    try:
+        import psutil
+
+        cpu_usage = float(psutil.cpu_percent(interval=None))
+        memory_usage = float(psutil.virtual_memory().percent)
+    except Exception:
+        pass
+
+    online_cameras = sum(1 for c in cameras.values() if str(c.status).upper() == "ONLINE")
+    edge_connected = online_cameras > 0 or len(processes) > 0 or bool(_latest_metrics)
+    gpu_usage = float(_latest_metrics.get("gpu_utilization_pct") or 0.0)
+
     return {
         "status": "healthy",
-        "edge_node": "online" if len(processes) > 0 else "offline",
+        "edge_node": "online" if edge_connected else "offline",
+        "edge_node_connected": edge_connected,
+        "active_cameras": online_cameras or len(cameras),
         "database": db_status,
         "database_provider": "supabase" if db.db_enabled() else "none",
-        "cpu_usage": 0,
-        "memory_usage": 0,
-        "gpu_usage": 0,
-        "uptime_seconds": 0,
+        "cpu_usage": cpu_usage,
+        "memory_usage": memory_usage,
+        "gpu_usage": gpu_usage,
+        "uptime_seconds": int(time.time() - _START_TIME),
     }
 
 
 @app.get("/api/metrics")
 async def get_metrics():
+    if _latest_metrics:
+        return _latest_metrics
     if config.get("mock", {}).get("mock_charts"):
         return {
+            "fps": 0,
+            "inference_fps": 0,
+            "cpu_utilization_pct": 0,
+            "gpu_utilization_pct": 0,
             "active_cameras": len(cameras),
-            "total_detections_today": 12450,
-            "active_incidents": 2,
-            "system_health": "Optimal",
         }
-
-    if not config.get("database", {}).get("enabled"):
-        raise HTTPException(
-            status_code=501,
-            detail="Metrics database not connected. Enable 'mock_charts' in config or implement DB integration.",
-        )
-
     return {}
 
 
@@ -257,7 +316,6 @@ async def get_metrics():
 async def get_incidents():
     if db.db_enabled():
         try:
-            # Query the unified incidents table and join incident_events
             res = (
                 db.get_db()
                 .table("incidents")
@@ -265,14 +323,63 @@ async def get_incidents():
                 .order("created_at", desc=True)
                 .execute()
             )
-            return res.data
+            if res.data:
+                return res.data
         except Exception as e:
             print(f"[Supabase DB] get_incidents error: {e}")
+    return list(_in_memory_incidents)
 
-    if config.get("mock", {}).get("mock_alerts"):
-        return []  # Return mock array if mock is enabled
 
-    return []
+@app.get("/api/incidents/{incident_id}")
+async def get_incident(incident_id: str):
+    for inc in _in_memory_incidents:
+        if _incident_key(inc) == incident_id:
+            return inc
+    if db.db_enabled():
+        try:
+            res = (
+                db.get_db()
+                .table("incidents")
+                .select("*")
+                .eq("id", incident_id)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                return res.data[0]
+        except Exception as e:
+            print(f"[Supabase DB] get_incident error: {e}")
+    raise HTTPException(status_code=404, detail="Incident not found")
+
+
+@app.post("/api/incidents/{incident_id}/acknowledge")
+async def acknowledge_incident(incident_id: str):
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    for inc in _in_memory_incidents:
+        if _incident_key(inc) == incident_id:
+            inc["status"] = "ACKNOWLEDGED"
+            inc["acknowledged_at"] = now
+            return inc
+    if db.db_enabled():
+        try:
+            res = (
+                db.get_db()
+                .table("incidents")
+                .select("*")
+                .eq("id", incident_id)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                record = dict(res.data[0])
+                record["status"] = "ACKNOWLEDGED"
+                record["acknowledged_at"] = now
+                db.get_db().table("incidents").upsert(record).execute()
+                return record
+        except Exception as e:
+            print(f"[Supabase DB] acknowledge_incident error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    raise HTTPException(status_code=404, detail="Incident not found")
 
 
 @app.get("/api/events")
@@ -287,14 +394,11 @@ async def get_events():
                 .limit(50)
                 .execute()
             )
-            return res.data
+            if res.data:
+                return res.data
         except Exception as e:
             print(f"[Supabase DB] get_events error: {e}")
-
-    if config.get("mock", {}).get("mock_alerts"):
-        return []  # Return mock array if mock is enabled
-
-    return []
+    return list(_in_memory_events[:50])
 
 
 async def broadcast_ws_message(payload: dict, sender: Optional[WebSocket] = None):
@@ -366,33 +470,35 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if msg_type == "edge_heartbeat":
                 cam_id = data.get("camera_id", node_id)
+                advertised_stream = data.get("stream_url")
                 if cam_id not in cameras:
                     cameras[cam_id] = Camera(
                         camera_id=cam_id,
                         name=cam_id,
-                        source_url="data/videos/border_crossing_test.mp4",
-                        source_type="file",
+                        source_url=data.get("source_url", "data/videos/border_crossing_test.mp4"),
+                        source_type=data.get("source_type", "file"),
                         status=data.get("status", "ONLINE"),
-                        stream_url=data.get("stream_url", "http://localhost:8081/stream"),
+                        stream_url=advertised_stream or "http://localhost:8081/stream",
                         inference_enabled=True,
                     )
                 else:
                     cameras[cam_id].status = data.get("status", "ONLINE")
-                    if "stream_url" in data:
-                        cameras[cam_id].stream_url = data["stream_url"]
+                    if advertised_stream:
+                        cameras[cam_id].stream_url = advertised_stream
                 await broadcast_ws_message(
                     {
                         "type": "camera_status",
                         "camera_id": cam_id,
                         "status": data.get("status", "ONLINE"),
                         "fps": data.get("fps", 0.0),
+                        "stream_url": cameras[cam_id].stream_url,
                         "timestamp": time.time(),
                     },
                     sender=websocket,
                 )
 
             elif msg_type == "edge_event":
-                # Forward to dashboard
+                _remember(_in_memory_events, dict(data))
                 await broadcast_ws_message(
                     {
                         "type": "event",
@@ -445,10 +551,17 @@ async def websocket_endpoint(websocket: WebSocket):
                         print(f"[Supabase DB] save_event error: {db_err}")
 
             elif msg_type == "edge_incident":
+                incident_payload = dict(data)
+                incident_payload.setdefault("status", "OPEN")
+                incident_payload.setdefault(
+                    "incident_id", incident_payload.get("id", f"INC-{uuid.uuid4().hex[:8].upper()}")
+                )
+                incident_payload.setdefault("camera_id", incident_payload.get("camera_name", node_id))
+                _remember(_in_memory_incidents, incident_payload)
                 await broadcast_ws_message(
                     {
                         "type": "incident",
-                        "data": data,
+                        "data": incident_payload,
                     },
                     sender=websocket,
                 )
@@ -498,10 +611,12 @@ async def websocket_endpoint(websocket: WebSocket):
                         print(f"[Supabase DB] save_incident error: {db_err}")
 
             elif msg_type == "edge_metrics":
+                global _latest_metrics
+                _latest_metrics = _normalize_metrics(data)
                 await broadcast_ws_message(
                     {
                         "type": "metrics",
-                        "data": data,
+                        "data": _latest_metrics,
                     },
                     sender=websocket,
                 )

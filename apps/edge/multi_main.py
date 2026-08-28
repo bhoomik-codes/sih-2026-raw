@@ -86,6 +86,11 @@ def _run_single_camera(
     }
     if no_display:
         config.setdefault("output", {})["display"] = False
+        config.setdefault("processor", {})["display"] = False
+
+    stream_port = camera_cfg.get("stream_port")
+    if stream_port:
+        config.setdefault("processor", {})["stream_port"] = int(stream_port)
 
     # Override metrics CSV to include camera_id
     metrics_base = shared_config.get("output", {}).get("metrics_csv", "benchmarks/phase8_run.csv")

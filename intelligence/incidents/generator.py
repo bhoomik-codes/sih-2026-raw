@@ -28,7 +28,7 @@ class IncidentGenerator:
 
     def __init__(self, config: dict = None) -> None:
         self._config = config or {}
-        inc_cfg = self._config.get("incident_engine", {})
+        inc_cfg = self._config.get("incident_engine") or self._config.get("incidents") or {}
 
         self._enabled = bool(inc_cfg.get("enabled", True))
         self._escalation_threshold = int(inc_cfg.get("escalation_threshold", 50))

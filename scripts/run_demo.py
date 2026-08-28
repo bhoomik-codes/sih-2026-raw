@@ -122,6 +122,8 @@ def main():
                 "--config",
                 args.edge_config,
                 "--no-display",
+                "--stream-port",
+                "8081",
             ]
             p_edge = subprocess.Popen(edge_cmd, cwd=str(ROOT_DIR))
             processes.append(p_edge)
