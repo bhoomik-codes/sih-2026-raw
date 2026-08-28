@@ -23,7 +23,7 @@ import logging
 import os
 import time
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Deque, Optional
 
 logger = logging.getLogger(__name__)
@@ -205,6 +205,7 @@ class MetricsCollector:
         if self._nvml_available:
             try:
                 import pynvml
+
                 pynvml.nvmlShutdown()
             except Exception:
                 pass
@@ -226,6 +227,7 @@ class MetricsCollector:
         """Attempt to initialise pynvml. Silently degrade if unavailable."""
         try:
             import pynvml
+
             pynvml.nvmlInit()
             self._nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(self._gpu_index)
             self._nvml_available = True
@@ -238,6 +240,7 @@ class MetricsCollector:
     def _init_psutil(self) -> None:
         try:
             import psutil  # noqa: F401
+
             self._psutil_available = True
         except ImportError:
             logger.warning("psutil unavailable — CPU/RAM metrics disabled")
@@ -250,18 +253,15 @@ class MetricsCollector:
             return None, None, None, None, None
         try:
             import pynvml
+
             util = pynvml.nvmlDeviceGetUtilizationRates(self._nvml_handle)
             mem = pynvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
-            temp = pynvml.nvmlDeviceGetTemperature(
-                self._nvml_handle, pynvml.NVML_TEMPERATURE_GPU
-            )
-            clock = pynvml.nvmlDeviceGetClockInfo(
-                self._nvml_handle, pynvml.NVML_CLOCK_SM
-            )
+            temp = pynvml.nvmlDeviceGetTemperature(self._nvml_handle, pynvml.NVML_TEMPERATURE_GPU)
+            clock = pynvml.nvmlDeviceGetClockInfo(self._nvml_handle, pynvml.NVML_CLOCK_SM)
             return (
                 float(util.gpu),
-                float(mem.used) / (1024 ** 2),
-                float(mem.total) / (1024 ** 2),
+                float(mem.used) / (1024**2),
+                float(mem.total) / (1024**2),
                 float(temp),
                 float(clock),
             )
@@ -275,9 +275,10 @@ class MetricsCollector:
             return 0.0, 0.0, 0.0
         try:
             import psutil
+
             cpu = psutil.cpu_percent(interval=None)
             ram = psutil.virtual_memory()
-            return cpu, float(ram.used) / (1024 ** 2), float(ram.total) / (1024 ** 2)
+            return cpu, float(ram.used) / (1024**2), float(ram.total) / (1024**2)
         except Exception:
             return 0.0, 0.0, 0.0
 
@@ -285,13 +286,28 @@ class MetricsCollector:
         """Open CSV file and write header row."""
         os.makedirs(os.path.dirname(self._csv_path) or ".", exist_ok=True)
         self._csv_file = open(self._csv_path, "w", newline="", encoding="utf-8")
-        fieldnames = list(asdict(FrameMetrics(
-            frame_id=0, wall_time=0, inference_latency_ms=0,
-            end_to_end_latency_ms=0, fps_rolling=0, gpu_utilization_pct=None,
-            vram_used_mb=None, vram_total_mb=None, gpu_temp_celsius=None,
-            gpu_clock_mhz=None, cpu_percent=0, ram_used_mb=0, ram_total_mb=0,
-            queue_depth=0, dropped_frames=0, num_detections=0,
-        )).keys())
+        fieldnames = list(
+            asdict(
+                FrameMetrics(
+                    frame_id=0,
+                    wall_time=0,
+                    inference_latency_ms=0,
+                    end_to_end_latency_ms=0,
+                    fps_rolling=0,
+                    gpu_utilization_pct=None,
+                    vram_used_mb=None,
+                    vram_total_mb=None,
+                    gpu_temp_celsius=None,
+                    gpu_clock_mhz=None,
+                    cpu_percent=0,
+                    ram_used_mb=0,
+                    ram_total_mb=0,
+                    queue_depth=0,
+                    dropped_frames=0,
+                    num_detections=0,
+                )
+            ).keys()
+        )
         self._csv_writer = csv.DictWriter(self._csv_file, fieldnames=fieldnames)
         self._csv_writer.writeheader()
         logger.info("Metrics CSV opened: %s", self._csv_path)

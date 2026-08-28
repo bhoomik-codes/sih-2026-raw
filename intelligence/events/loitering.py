@@ -28,7 +28,7 @@ Config structure (from YAML):
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 import numpy as np
 
@@ -59,9 +59,7 @@ class _LoiteringZone:
         # track_id → whether loitering has already fired for this visit
         self._alerted: Set[int] = set()
 
-    def check(
-        self, det: Detection, camera_name: str
-    ) -> Optional[SurveillanceEvent]:
+    def check(self, det: Detection, camera_name: str) -> Optional[SurveillanceEvent]:
         if det.track_id is None:
             return None
         if self.classes is not None and det.class_name not in self.classes:
@@ -104,6 +102,13 @@ class _LoiteringZone:
 
         return None
 
+    def cleanup_stale_tracks(self, active_track_ids: set) -> None:
+        """Prune tracks that have left or become stale."""
+        stale_tids = [tid for tid in list(self._entry_time.keys()) if tid not in active_track_ids]
+        for tid in stale_tids:
+            self._entry_time.pop(tid, None)
+            self._alerted.discard(tid)
+
 
 class LoiteringEngine:
     """
@@ -123,9 +128,7 @@ class LoiteringEngine:
             classes = set(z["classes"]) if z.get("classes") else None
             severity = EventSeverity[z.get("severity", "medium").upper()]
             threshold_s = float(z.get("threshold_s", 10.0))
-            self._zones.append(
-                _LoiteringZone(z["name"], polygon, threshold_s, classes, severity)
-            )
+            self._zones.append(_LoiteringZone(z["name"], polygon, threshold_s, classes, severity))
 
     def update(self, detections: List[Detection]) -> List[SurveillanceEvent]:
         """Check all detections against all loitering zones."""
@@ -137,15 +140,27 @@ class LoiteringEngine:
                     events.append(event)
         return events
 
+    def cleanup_stale_tracks(self, active_track_ids: set) -> None:
+        """Prune stale tracks across all loitering zones."""
+        for zone in self._zones:
+            zone.cleanup_stale_tracks(active_track_ids)
+
     def draw(self, frame: "np.ndarray") -> None:
         """Draw loitering zones on the frame in-place."""
         import cv2
+
         for zone in self._zones:
             colour = (255, 165, 0)  # Orange
             cv2.polylines(frame, [zone.polygon.reshape(-1, 1, 2)], True, colour, 2)
             cx = int(zone.polygon[:, 0].mean())
             cy = int(zone.polygon[:, 1].mean())
             cv2.putText(
-                frame, f"{zone.name} ({zone.threshold_s}s)", (cx - 30, cy),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, colour, 1, cv2.LINE_AA
+                frame,
+                f"{zone.name} ({zone.threshold_s}s)",
+                (cx - 30, cy),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                colour,
+                1,
+                cv2.LINE_AA,
             )

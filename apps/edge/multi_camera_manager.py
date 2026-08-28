@@ -1,4 +1,4 @@
-﻿"""
+"""
 apps.edge.multi_camera_manager
 --------------------------------
 MultiCameraManager — manages N video pipelines concurrently (Phase 8).
@@ -51,11 +51,17 @@ def _create_pipeline(cam_cfg: dict, camera_id: str) -> VideoPipelineBase:
         An instantiated (but not yet started) VideoPipelineBase subclass.
     """
     backend = cam_cfg.get("pipeline", "opencv").lower()
-    if backend == "gstreamer":
+    if backend == "deepstream":
+        from pipelines.deepstream.pipeline import DeepStreamPipeline
+
+        return DeepStreamPipeline(cam_cfg, camera_id)
+    elif backend == "gstreamer":
         from pipelines.gstreamer.pipeline import GStreamerPipeline
+
         return GStreamerPipeline(cam_cfg, camera_id)
     else:
         from pipelines.opencv.pipeline import OpenCVPipeline
+
         return OpenCVPipeline(cam_cfg, camera_id)
 
 
@@ -164,13 +170,13 @@ class MultiCameraManager:
     # Frame access
     # ------------------------------------------------------------------
 
-    def read(self, camera_id: str, timeout: float = 0.05) -> Optional[Frame]:
+    def read(self, camera_id: str, timeout: float = 0.0) -> Optional[Frame]:
         """
         Retrieve the latest frame from a specific camera.
 
         Args:
             camera_id: Camera identifier.
-            timeout:   Maximum wait time in seconds.
+            timeout:   Maximum wait time in seconds (default: 0.0 for non-blocking).
 
         Returns:
             Frame or None if no frame available within timeout.
@@ -184,19 +190,32 @@ class MultiCameraManager:
                 self._health[camera_id].last_frame_ts = frame.timestamp
         return frame
 
-    def get_latest_frames(self, timeout: float = 0.05) -> Dict[str, Optional[Frame]]:
+    def get_latest_frames(self, timeout: float = 0.0) -> Dict[str, Optional[Frame]]:
         """
-        Retrieve the latest available frame from ALL cameras.
+        Retrieve the latest available frame from ALL cameras without sequential blocking delays.
 
         Args:
-            timeout: Maximum wait per camera, in seconds.
+            timeout: Total maximum wait time across all cameras (default: 0.0 for non-blocking).
 
         Returns:
             Dict mapping camera_id → Frame (or None if no frame available).
         """
         frames: Dict[str, Optional[Frame]] = {}
+        if not self._pipelines:
+            return frames
+
+        # Fast non-blocking path
+        if timeout <= 0.0:
+            for camera_id in self._pipelines:
+                frames[camera_id] = self.read(camera_id, timeout=0.0)
+            return frames
+
+        # If a positive total timeout is provided, distribute across cameras up to global deadline
+        deadline = time.time() + timeout
         for camera_id in self._pipelines:
-            frames[camera_id] = self.read(camera_id, timeout=timeout)
+            remaining = max(0.0, deadline - time.time())
+            cam_timeout = min(0.01, remaining)
+            frames[camera_id] = self.read(camera_id, timeout=cam_timeout)
         return frames
 
     # ------------------------------------------------------------------

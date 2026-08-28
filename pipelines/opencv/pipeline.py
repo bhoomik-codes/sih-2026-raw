@@ -1,4 +1,4 @@
-﻿"""
+"""
 pipelines.opencv.pipeline
 --------------------------
 OpenCV-based video pipeline (Phase 8).

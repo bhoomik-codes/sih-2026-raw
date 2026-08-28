@@ -1,4 +1,4 @@
-﻿"""
+"""
 scripts/export_onnx.py
 -----------------------
 Export a YOLOv8 PyTorch model to ONNX format (Phase 7).
@@ -85,9 +85,9 @@ def main() -> None:
         format="onnx",
         imgsz=args.imgsz,
         half=args.half,
-        opset=17,          # ONNX opset — 17 is broadly compatible
-        simplify=True,     # Graph simplification via onnx-simplifier
-        dynamic=False,     # Static batch size (1) for TensorRT compatibility
+        opset=17,  # ONNX opset — 17 is broadly compatible
+        simplify=True,  # Graph simplification via onnx-simplifier
+        dynamic=False,  # Static batch size (1) for TensorRT compatibility
     )
     logger.info("Export complete: %s", exported)
 
@@ -95,6 +95,7 @@ def main() -> None:
     exported_path = Path(str(exported))
     if exported_path.resolve() != output_path.resolve():
         import shutil
+
         shutil.move(str(exported_path), str(output_path))
         logger.info("Moved to: %s", output_path)
 

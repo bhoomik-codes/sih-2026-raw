@@ -1,20 +1,20 @@
-﻿"""tests/test_pipelines.py — Unit tests for OpenCVPipeline and GStreamerPipeline (Phase 8)."""
+"""tests/test_pipelines.py — Unit tests for OpenCVPipeline and GStreamerPipeline (Phase 8)."""
+
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import numpy as np
 import pytest
 
 from pipelines.base import PipelineStatus, VideoPipelineBase
-from pipelines.opencv.pipeline import OpenCVPipeline
 from pipelines.gstreamer.pipeline import GStreamerPipeline, _is_gstreamer_available
-
+from pipelines.opencv.pipeline import OpenCVPipeline
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_cam_config(source: str = "data/videos/test_video.mp4") -> dict:
     return {
@@ -29,6 +29,7 @@ def _make_cam_config(source: str = "data/videos/test_video.mp4") -> dict:
 # VideoPipelineBase abstract interface tests
 # ---------------------------------------------------------------------------
 
+
 class TestVideoPipelineBase:
     def test_cannot_instantiate_abstract(self):
         """Direct instantiation of the ABC should raise TypeError."""
@@ -37,34 +38,49 @@ class TestVideoPipelineBase:
 
     def test_concrete_must_implement_start(self):
         """Subclass without start() should not be instantiatable."""
+
         class Incomplete(VideoPipelineBase):
-            def stop(self): pass
-            def read(self, timeout=0.05): return None
+            def stop(self):
+                pass
+
+            def read(self, timeout=0.05):
+                return None
 
         with pytest.raises(TypeError):
             Incomplete({}, "CAM-01")
 
     def test_concrete_must_implement_stop(self):
         class Incomplete(VideoPipelineBase):
-            def start(self): pass
-            def read(self, timeout=0.05): return None
+            def start(self):
+                pass
+
+            def read(self, timeout=0.05):
+                return None
 
         with pytest.raises(TypeError):
             Incomplete({}, "CAM-01")
 
     def test_concrete_must_implement_read(self):
         class Incomplete(VideoPipelineBase):
-            def start(self): pass
-            def stop(self): pass
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
 
         with pytest.raises(TypeError):
             Incomplete({}, "CAM-01")
 
     def test_minimal_concrete_works(self):
         class Minimal(VideoPipelineBase):
-            def start(self): self._status = PipelineStatus.RUNNING
-            def stop(self): self._status = PipelineStatus.STOPPED
-            def read(self, timeout=0.05): return None
+            def start(self):
+                self._status = PipelineStatus.RUNNING
+
+            def stop(self):
+                self._status = PipelineStatus.STOPPED
+
+            def read(self, timeout=0.05):
+                return None
 
         p = Minimal({}, "CAM-01")
         assert p.camera_id == "CAM-01"
@@ -78,6 +94,7 @@ class TestVideoPipelineBase:
 # ---------------------------------------------------------------------------
 # OpenCVPipeline tests
 # ---------------------------------------------------------------------------
+
 
 class TestOpenCVPipeline:
     def _pipeline(self, source: str = "data/videos/test_video.mp4") -> OpenCVPipeline:
@@ -135,6 +152,7 @@ class TestOpenCVPipeline:
 # ---------------------------------------------------------------------------
 # GStreamerPipeline tests
 # ---------------------------------------------------------------------------
+
 
 class TestGStreamerPipeline:
     def _pipeline(self, source: str = "data/videos/test_video.mp4") -> GStreamerPipeline:

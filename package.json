@@ -1,0 +1,10 @@
+{
+  "name": "ibvap-root",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "npm --prefix apps/dashboard run dev",
+    "build": "npm --prefix apps/dashboard run build",
+    "preview": "npm --prefix apps/dashboard run preview"
+  }
+}

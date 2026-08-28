@@ -1,67 +1,93 @@
-# apps/edge — AI Edge Processing Node (Laptop 1)
+# apps/edge — Edge AI Inference & Processing Node (Laptop 1)
 
+> **Status:** Production Ready (Phases 1–8 Complete)  
 > **Hardware target:** Laptop 1 — Intel i5 13th Gen · NVIDIA RTX 4050 6 GB VRAM
 
-This is the AI inference node. It is the only component that touches GPU resources.
+The Edge Node is the dedicated GPU compute worker in the IBVAP architecture. It ingests live video streams, executes high-throughput neural detection, runs multi-object tracking, calculates spatial threat rules, serves local MJPEG video feeds, and streams structured events to the Command Center backend.
 
-## Responsibilities
+---
+
+## 🏗️ Edge Processing Loop
 
 ```
-CCTV Camera (RTSP / local file)
-         ↓
-   VideoSource (video_source.py)
-   - Thread-safe frame ingestion
-   - RTSP watchdog + auto-reconnect
-   - Latest-frame bounded queue (prevents latency buildup)
-         ↓
-   Preprocessing (cv/preprocessing/)
-   - Resize to inference resolution
-   - Optional ROI masking
-         ↓
-   Perception Engine (cv/detection/, cv/tracking/)
-   - Object detection (YOLOv8 via YOLODetector)
-   - Multi-object tracking (Phase 2: ByteTrack/BoT-SORT)
-         ↓
-   Event Engine (intelligence/events/) — Phase 3
-   - Virtual fence / line crossing
-   - Loitering detection
-   - Direction detection
-         ↓
-   Risk & Incident Engine (intelligence/) — Phase 4
-   - Event correlation
-   - Risk scoring
-   - Incident generation
-         ↓
-   Metrics + Event Publisher
-   - Emits structured events over WebSocket to apps/backend/
-   - Exposes /health and /metrics endpoints
+  Camera / Video Source (RTSP / .mp4 / USB / GStreamer)
+          │
+          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 apps/edge/processor.py                      │
+│                                                             │
+│  1. Video Ingestion (`apps/edge/video_source.py`)           │
+│     - Thread-safe bounded queue (drops stale frames)        │
+│     - Active RTSP watchdog with auto-reconnect              │
+│                                                             │
+│  2. Frame Preprocessing (`cv/preprocessing/frame_prep.py`)   │
+│     - Dynamic low-light CLAHE contrast boost                │
+│     - Optional polygon ROI masking & letterbox scaling      │
+│                                                             │
+│  3. Neural Detection (`cv/detection/`)                      │
+│     - YOLOv8 (PyTorch / ONNX Runtime / TensorRT)            │
+│     - Configurable N-frame skip inference                   │
+│                                                             │
+│  4. Multi-Object Tracking (`cv/tracking/byte_tracker.py`)   │
+│     - ByteTrack Kalman filter tracking                      │
+│     - Persistent track IDs with TTL trajectory garbage coll.│
+│                                                             │
+│  5. Threat Rules & Intelligence (`intelligence/`)           │
+│     - Virtual Fence & Line Crossing checks                  │
+│     - Dwell-time loitering & Night activity triggers        │
+│     - ANPR plate crop buffer & OCR scheduling               │
+│     - Cumulative multi-event Risk Scoring                   │
+│                                                             │
+│  6. MJPEG Video Streamer (`apps/edge/streamer.py`)          │
+│     - Background HTTP server (port 8081+)                   │
+│     - Encodes real-time HUD annotations for browser feeds   │
+│                                                             │
+│  7. Event Transmitter (`apps/edge/transmitter.py`)          │
+│     - Non-blocking queue to `ws://localhost:8000/ws`        │
+│     - Auto-reconnecting background worker                   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Running
+---
+
+## ⚡ CLI Usage & Commands
 
 ```bash
-# Standard run (displays annotated video window)
-python -m apps.edge.main --config configs/phase1_default.yaml
+# Activate virtual environment
+source .venv/bin/activate  # On Windows: .\.venv\Scripts\activate
 
-# Headless — for remote/SSH sessions
-python -m apps.edge.main --config configs/phase1_default.yaml --no-display
+# 1. Single camera run with live video streaming on port 8081
+python -m apps.edge.main \
+  --config configs/phase1_default.yaml \
+  --source data/videos/border_crossing_test.mp4 \
+  --stream-port 8081
 
-# Override camera source at CLI
-python -m apps.edge.main --config configs/phase1_default.yaml \
-    --source rtsp://192.168.1.10:554/stream
+# 2. Headless mode (no local OpenCV GUI window, only HTTP streaming)
+python -m apps.edge.main \
+  --config configs/phase1_default.yaml \
+  --no-display \
+  --stream-port 8081
+
+# 3. ONNX Runtime backend (Phase 7)
+python -m apps.edge.main \
+  --config configs/phase7_default.yaml \
+  --stream-port 8081
+
+# 4. Multi-camera concurrent supervisor (Phase 8)
+python -m apps.edge.multi_main \
+  --config configs/phase8_default.yaml
 ```
 
-## Files
+---
 
-| File | Purpose |
-|------|---------|
-| `main.py` | CLI entry point |
-| `video_source.py` | Thread-safe camera/RTSP reader |
-| `processor.py` | Main inference loop |
-| `metrics.py` | GPU/CPU/FPS metrics collection |
+## 📂 Key Files
 
-## What This Node Does NOT Do
-
-- **No UI** — display window is development-only; removed for demo
-- **No database writes** — events go via WebSocket to `apps/backend/`
-- **No HTTP serving** — the backend handles that
+| Module | Description |
+| :--- | :--- |
+| `main.py` | CLI entry point for single-camera edge node with runtime overrides. |
+| `multi_main.py` | Supervisor managing concurrent worker threads across multiple cameras. |
+| `processor.py` | Central processing loop coordinating CV, tracking, intelligence, and streaming. |
+| `streamer.py` | Zero-overhead HTTP MJPEG video streamer for web dashboards. |
+| `transmitter.py` | Non-blocking background WebSocket client transmitting events to backend. |
+| `video_source.py` | Threaded video reader with hardware watchdog and ring-buffer queue. |
+| `metrics.py` | Telemetry recorder for rolling FPS, GPU VRAM, and pipeline latencies. |

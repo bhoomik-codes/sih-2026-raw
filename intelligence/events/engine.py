@@ -69,7 +69,10 @@ class EventEngine:
 
         logger.info(
             "EventEngine initialised  camera=%s  zones=%d  lines=%d  loitering=%d  night=%s",
-            camera_name, len(zones_cfg), len(lines_cfg), len(loiter_cfg),
+            camera_name,
+            len(zones_cfg),
+            len(lines_cfg),
+            len(loiter_cfg),
             bool(night_cfg.get("enabled", True)),
         )
 
@@ -98,7 +101,10 @@ class EventEngine:
         return events
 
     def cleanup_stale_tracks(self, active_track_ids: set) -> None:
-        """Propagate stale-track cleanup to sub-engines that maintain per-track state."""
+        """Propagate stale-track cleanup to all sub-engines that maintain per-track state."""
+        self._fence.cleanup_stale_tracks(active_track_ids)
+        self._crossing.cleanup_stale_tracks(active_track_ids)
+        self._loitering.cleanup_stale_tracks(active_track_ids)
         self._night.cleanup_stale_tracks(active_track_ids)
 
     def draw(self, frame: np.ndarray) -> None:

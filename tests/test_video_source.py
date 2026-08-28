@@ -20,16 +20,12 @@ Run:
 
 from __future__ import annotations
 
-import queue
-import threading
 import time
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest
 
 from apps.edge.video_source import Frame, VideoSource
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

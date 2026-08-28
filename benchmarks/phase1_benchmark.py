@@ -32,7 +32,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-import cv2
 import numpy as np
 
 # Allow importing from project root
@@ -82,6 +81,7 @@ class BenchmarkResult:
 def _init_nvml():
     try:
         import pynvml
+
         pynvml.nvmlInit()
         handle = pynvml.nvmlDeviceGetHandleByIndex(0)
         name = pynvml.nvmlDeviceGetName(handle)
@@ -99,7 +99,7 @@ def _query_gpu(pynvml, handle):
         util = pynvml.nvmlDeviceGetUtilizationRates(handle)
         mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
         temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
-        return float(util.gpu), float(mem.used) / (1024 ** 2), float(temp)
+        return float(util.gpu), float(mem.used) / (1024**2), float(temp)
     except Exception:
         return None, None, None
 
@@ -107,9 +107,10 @@ def _query_gpu(pynvml, handle):
 def _query_cpu_ram():
     try:
         import psutil
+
         cpu = psutil.cpu_percent(interval=None)
         ram = psutil.virtual_memory()
-        return cpu, float(ram.used) / (1024 ** 2)
+        return cpu, float(ram.used) / (1024**2)
     except Exception:
         return 0.0, 0.0
 
@@ -137,9 +138,9 @@ def run_benchmark(
     res_str = f"{w}×{h}"
     model_name = Path(model_path).stem
 
-    print(f"\n{'─'*60}")
+    print(f"\n{'─' * 60}")
     print(f"  Model: {model_name}  Resolution: {res_str}  Device: {device}")
-    print(f"{'─'*60}")
+    print(f"{'─' * 60}")
 
     config = {
         "detector": {
@@ -180,7 +181,9 @@ def run_benchmark(
     start_wall = time.perf_counter()
     frame_id = 0
 
-    print(f"  Measuring {max_frames if not duration_s else f'{duration_s}s'} ...", end=" ", flush=True)
+    print(
+        f"  Measuring {max_frames if not duration_s else f'{duration_s}s'} ...", end=" ", flush=True
+    )
 
     while frame_id < max_frames:
         if duration_s and (time.perf_counter() - start_wall) >= duration_s:
@@ -236,6 +239,7 @@ def run_benchmark(
     del detector
     try:
         import torch
+
         torch.cuda.empty_cache()
     except Exception:
         pass
@@ -272,11 +276,20 @@ def save_csv(results: List[BenchmarkResult], path: str) -> None:
     """Save results to a CSV file."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     fields = [
-        "model", "resolution", "backend", "frames_measured",
-        "fps_avg", "fps_min", "fps_max",
-        "latency_avg_ms", "latency_p95_ms",
-        "vram_peak_mb", "gpu_util_avg", "gpu_temp_peak",
-        "cpu_avg_pct", "ram_used_mb",
+        "model",
+        "resolution",
+        "backend",
+        "frames_measured",
+        "fps_avg",
+        "fps_min",
+        "fps_max",
+        "latency_avg_ms",
+        "latency_p95_ms",
+        "vram_peak_mb",
+        "gpu_util_avg",
+        "gpu_temp_peak",
+        "cpu_avg_pct",
+        "ram_used_mb",
     ]
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields)
@@ -297,29 +310,37 @@ def main() -> None:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--model", nargs="+",
+        "--model",
+        nargs="+",
         default=["yolov8n.pt"],
         help="Model weight files to benchmark (space-separated).",
     )
     parser.add_argument(
-        "--resolutions", nargs="+",
+        "--resolutions",
+        nargs="+",
         default=[f"{w}x{h}" for w, h in RESOLUTIONS],
         help="Resolutions to test as WxH (e.g. 640x640 1280x720).",
     )
     parser.add_argument(
-        "--device", default="cuda:0",
+        "--device",
+        default="cuda:0",
         help="PyTorch device string.",
     )
     parser.add_argument(
-        "--frames", type=int, default=DEFAULT_BENCHMARK_FRAMES,
+        "--frames",
+        type=int,
+        default=DEFAULT_BENCHMARK_FRAMES,
         help="Number of frames per configuration (ignored if --duration set).",
     )
     parser.add_argument(
-        "--duration", type=float, default=None,
+        "--duration",
+        type=float,
+        default=None,
         help="Benchmark duration in seconds per config (thermal soak test).",
     )
     parser.add_argument(
-        "--output-csv", default="benchmarks/phase1_results.csv",
+        "--output-csv",
+        default="benchmarks/phase1_results.csv",
         help="Path for output CSV.",
     )
     args = parser.parse_args()

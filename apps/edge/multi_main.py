@@ -1,4 +1,4 @@
-﻿"""
+"""
 apps.edge.multi_main
 ---------------------
 Multi-camera CLI entry point for Phase 8.
@@ -32,7 +32,6 @@ import argparse
 import logging
 import sys
 import threading
-import time
 from pathlib import Path
 from typing import List
 
@@ -75,7 +74,7 @@ def _run_single_camera(
     """
     camera_id = camera_cfg.get("id", camera_cfg.get("name", "CAM-?"))
     thread_name = threading.current_thread().name
-    logger.info("[%s] Camera thread starting.", camera_id)
+    logger.info("[%s] Camera thread %s starting.", camera_id, thread_name)
 
     # Build merged config: shared settings + camera-specific source
     config = dict(shared_config)
@@ -96,16 +95,18 @@ def _run_single_camera(
         f"{Path(metrics_base).parent}/{base_stem}_{camera_id}{base_ext}"
     )
 
-    from cv.detection.yolo_detector import YOLODetector
     from apps.edge.processor import EdgeProcessor
+    from cv.detection.yolo_detector import YOLODetector
 
     # Use pipeline-backed VideoSource
     pipeline_backend = camera_cfg.get("pipeline", "opencv").lower()
     if pipeline_backend == "gstreamer":
         from pipelines.gstreamer.pipeline import GStreamerPipeline
+
         pipeline = GStreamerPipeline(camera_cfg, camera_id)
     else:
         from pipelines.opencv.pipeline import OpenCVPipeline
+
         pipeline = OpenCVPipeline(camera_cfg, camera_id)
 
     # For EdgeProcessor we need a VideoSource-compatible object.
@@ -116,6 +117,7 @@ def _run_single_camera(
     backend = det_cfg.get("backend", "pytorch").lower()
     if backend == "onnx":
         from cv.detection.onnx_detector import ONNXDetector
+
         detector = ONNXDetector(config=config)
     else:
         detector = YOLODetector(config=config)
@@ -134,6 +136,7 @@ def _run_single_camera(
     if video_source is None:
         # GStreamerPipeline doesn't wrap VideoSource; create a shim
         from apps.edge.video_source import VideoSource
+
         video_source = VideoSource(
             source_uri=camera_cfg.get("source", 0),
             max_queue_size=int(camera_cfg.get("max_queue_size", 2)),

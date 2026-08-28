@@ -1,10 +1,9 @@
-﻿"""tests/test_night_activity.py — Unit tests for NightActivityEngine (Phase 6)."""
+"""tests/test_night_activity.py — Unit tests for NightActivityEngine (Phase 6)."""
+
 from __future__ import annotations
 
 import time
 from unittest.mock import patch
-
-import pytest
 
 from cv.detection.base import BBox, Detection
 from intelligence.events.base import EventType
@@ -26,6 +25,7 @@ def _make_det(track_id: int = 1, class_name: str = "person") -> Detection:
 
 
 # ── is_night() tests ──────────────────────────────────────────────────────────
+
 
 class TestIsNight:
     def test_is_night_at_22h(self):
@@ -74,6 +74,7 @@ class TestIsNight:
 
 
 # ── update() tests ────────────────────────────────────────────────────────────
+
 
 class TestNightActivityUpdate:
     def _engine_at_hour(self, hour: int, config: dict | None = None) -> NightActivityEngine:
@@ -164,6 +165,7 @@ class TestNightActivityUpdate:
 
 
 # ── cleanup_stale_tracks() tests ─────────────────────────────────────────────
+
 
 class TestCleanupStaleTracks:
     def test_cleanup_removes_stale_cooldown(self):
