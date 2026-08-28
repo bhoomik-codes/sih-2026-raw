@@ -55,4 +55,5 @@ Based on the strategic context in `context.md` and an analysis of the current co
 - [ ] **ANPR Integration:** Finalize the ANPR computer vision pipeline in `cv/anpr/` and ensure integration with `intelligence/anpr/engine.py` using hardware acceleration instead of mock mode.
 - [ ] **DeepStream Pipeline:** Begin experimenting with DeepStream pipelines (`pipelines/deepstream/`) to validate if it can handle multi-camera load more efficiently than the current OpenCV/GStreamer implementations.
 - [ ] **Command Center Integration:** Ensure that `apps/edge/` successfully transmits WebSocket events (Risk Scores, Incidents) to `apps/backend/`, and verify the `apps/dashboard/` visually reflects these alerts in real-time.
+- [ ] **Command Center UI:** Map view with Leaflet camera pins + incident markers (Leaflet CSS is in index.css), and a risk score sparkline on the command center header.
 - [ ] **Fix Known Issues:** Resolve the memory leak in ByteTrack (`cv/tracking/byte_tracker.py`), the OpenCV blocking read issue in `apps/edge/video_source.py`, and the sequential timeout delay in `apps/edge/multi_camera_manager.py`.
