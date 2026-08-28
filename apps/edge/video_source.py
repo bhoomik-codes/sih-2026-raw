@@ -194,24 +194,9 @@ class VideoSource:
             self._last_frame_ts = time.time()
             logger.info("[%s] Stream opened successfully.", self._name)
 
-            # Start watchdog thread for network streams to unblock hung reads
-            watchdog_stop = threading.Event()
-            watchdog_thread = None
-            if self._is_network_source:
-                watchdog_thread = threading.Thread(
-                    target=self._watchdog_loop,
-                    args=(cap, watchdog_stop),
-                    name=f"Watchdog-{self._name}",
-                    daemon=True,
-                )
-                watchdog_thread.start()
-
             try:
                 self._read_frames(cap)
             finally:
-                watchdog_stop.set()
-                if watchdog_thread:
-                    watchdog_thread.join(timeout=1.0)
                 try:
                     cap.release()
                 except Exception:
@@ -227,21 +212,6 @@ class VideoSource:
                 )
                 self._stop_event.wait(self._reconnect_delay_s)
 
-    def _watchdog_loop(self, cap: cv2.VideoCapture, stop_evt: threading.Event) -> None:
-        """Monitor read heartbeat; unblock OpenCV if read hangs indefinitely on silent network drop."""
-        while not stop_evt.is_set() and not self._stop_event.is_set():
-            time.sleep(1.0)
-            if self._is_connected and (time.time() - self._last_frame_ts > self._read_timeout_s):
-                logger.warning(
-                    "[%s] Read timeout (>%.1fs without frame). Forcing reconnect...",
-                    self._name,
-                    self._read_timeout_s,
-                )
-                try:
-                    cap.release()
-                except Exception:
-                    pass
-                break
 
     def _open_source(self) -> Optional[cv2.VideoCapture]:
         """
