@@ -1,8 +1,16 @@
 import React, { useState } from 'react';
-import { Maximize2, Shield, Plus, Trash2, Save, AlertCircle, CheckCircle } from 'lucide-react';
-import { Camera, Zone, FenceLine } from '../types/camera';
-import { updateCameraZones, updateCameraFence } from '../api/cameras';
+import {
+  AlertCircle,
+  CheckCircle,
+  Edit3,
+  Plus,
+  Trash2,
+  XCircle,
+} from 'lucide-react';
+import { Camera, FenceLine, Zone } from '../types/camera';
+import { updateCameraFence, updateCameraZones } from '../api/cameras';
 import { LiveStream } from '../components/cameras/LiveStream';
+import { ZoneEditor } from '../components/cameras/ZoneEditor';
 import { EmptyState } from '../components/common/EmptyState';
 
 interface CameraDetailPageProps {
@@ -21,50 +29,103 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
   onRefresh,
 }) => {
   const [activeTab, setActiveTab] = useState<'zones' | 'fences'>('zones');
+
+  // Form fields — zone
   const [newZoneName, setNewZoneName] = useState<string>('');
   const [newZoneType, setNewZoneType] = useState<'restricted' | 'loitering'>('restricted');
   const [newZoneSeverity, setNewZoneSeverity] = useState<'low' | 'medium' | 'high' | 'critical'>('high');
 
+  // Form fields — fence
   const [newLineName, setNewLineName] = useState<string>('');
   const [newLineSeverity, setNewLineSeverity] = useState<'low' | 'medium' | 'high' | 'critical'>('critical');
 
+  // Drawing state
+  const [drawingActive, setDrawingActive] = useState<boolean>(false);
+  const [draftPolygon, setDraftPolygon] = useState<[number, number][] | null>(null);
+  const [draftLine, setDraftLine] = useState<{ start: [number, number]; end: [number, number] } | null>(null);
+
+  // Status
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
   if (cameras.length === 0) {
     return (
       <div className="flex-1 p-6">
-        <EmptyState title="No cameras available" message="Add a camera in Camera Management before configuring zones" />
+        <EmptyState
+          title="No cameras available"
+          message="Add a camera in Camera Management before configuring zones"
+        />
       </div>
     );
   }
 
   const camera = selectedCamera || cameras[0];
 
+  // ── Drawing callbacks ────────────────────────────────────────────────────
+  const handlePolygonComplete = (polygon: [number, number][]) => {
+    setDraftPolygon(polygon);
+    setDrawingActive(false);
+    setStatusMessage({ type: 'success', text: 'Polygon drawn — give it a name and click Save.' });
+  };
+
+  const handleLineComplete = (start: [number, number], end: [number, number]) => {
+    setDraftLine({ start, end });
+    setDrawingActive(false);
+    setStatusMessage({ type: 'success', text: 'Tripwire drawn — give it a name and click Save.' });
+  };
+
+  const handleClear = () => {
+    setDraftPolygon(null);
+    setDraftLine(null);
+    setStatusMessage(null);
+  };
+
+  const handleDrawingDone = () => {
+    setDrawingActive(false);
+  };
+
+  const startDrawing = () => {
+    // Clear current draft when starting a new one
+    setDraftPolygon(null);
+    setDraftLine(null);
+    setStatusMessage(null);
+    setDrawingActive(true);
+  };
+
+  const cancelDrawing = () => {
+    setDrawingActive(false);
+    setDraftPolygon(null);
+    setDraftLine(null);
+    setStatusMessage(null);
+  };
+
+  // ── Zone save/delete ─────────────────────────────────────────────────────
   const handleAddZone = async () => {
     if (!newZoneName || !camera) return;
     setIsSaving(true);
     setStatusMessage(null);
     try {
       const currentZones = camera.zones || [];
+      const polygon: [number, number][] = draftPolygon || [
+        [0, 360],
+        [960, 360],
+        [960, 720],
+        [0, 720],
+      ];
       const updatedZones: Zone[] = [
         ...currentZones,
         {
           name: newZoneName,
           type: newZoneType,
           severity: newZoneSeverity,
-          polygon: [
-            [0, 360],
-            [960, 360],
-            [960, 720],
-            [0, 720],
-          ],
+          polygon,
           classes: ['person'],
         },
       ];
       await updateCameraZones(camera.camera_id, updatedZones);
       setStatusMessage({ type: 'success', text: `Zone '${newZoneName}' saved to edge engine.` });
       setNewZoneName('');
+      setDraftPolygon(null);
       onRefresh();
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to save zone' });
@@ -89,6 +150,7 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
     }
   };
 
+  // ── Fence save/delete ────────────────────────────────────────────────────
   const handleAddFence = async () => {
     if (!newLineName || !camera) return;
     setIsSaving(true);
@@ -99,8 +161,8 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
         ...currentLines,
         {
           name: newLineName,
-          start: [0, 350],
-          end: [960, 350],
+          start: draftLine?.start || [0, 350],
+          end: draftLine?.end || [960, 350],
           direction: 'any',
           severity: newLineSeverity,
           classes: ['person'],
@@ -109,6 +171,7 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
       await updateCameraFence(camera.camera_id, updatedLines);
       setStatusMessage({ type: 'success', text: `Virtual Fence '${newLineName}' saved to edge engine.` });
       setNewLineName('');
+      setDraftLine(null);
       onRefresh();
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to save fence' });
@@ -132,6 +195,11 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
       setIsSaving(false);
     }
   };
+
+  // ── Derived state ────────────────────────────────────────────────────────
+  const hasDraft = activeTab === 'zones' ? !!draftPolygon : !!draftLine;
+  const canSaveZone = !!newZoneName && !isSaving;
+  const canSaveFence = !!newLineName && !isSaving;
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden p-4 space-y-3">
@@ -168,27 +236,41 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
           }`}
         >
           {statusMessage.type === 'success' ? (
-            <CheckCircle className="w-4 h-4" />
+            <CheckCircle className="w-4 h-4 flex-shrink-0" />
           ) : (
-            <AlertCircle className="w-4 h-4" />
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
           )}
           <span>{statusMessage.text}</span>
         </div>
       )}
 
-      {/* Main Area: Stream on Left, Configuration on Right */}
+      {/* Main Area */}
       <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 min-h-0">
-        {/* Stream Area (7 cols) */}
-        <div className="md:col-span-7 h-full min-h-[280px]">
-          <LiveStream camera={camera} className="h-full" />
+
+        {/* ── Stream Area with ZoneEditor overlay (7 cols) ── */}
+        <div className="md:col-span-7 h-full min-h-[280px] relative">
+          {/* The LiveStream img + overlay share a positioned container */}
+          <div className="relative w-full h-full rounded-sm overflow-hidden">
+            <LiveStream camera={camera} className="absolute inset-0 w-full h-full" />
+            <ZoneEditor
+              mode={activeTab}
+              drawingActive={drawingActive}
+              existingZones={camera.zones || []}
+              existingLines={camera.lines || []}
+              onPolygonComplete={handlePolygonComplete}
+              onLineComplete={handleLineComplete}
+              onClear={handleClear}
+              onDrawingDone={handleDrawingDone}
+            />
+          </div>
         </div>
 
-        {/* Configuration Area (5 cols) */}
+        {/* ── Configuration Area (5 cols) ── */}
         <div className="md:col-span-5 bg-slate-900 rounded-lg border border-slate-800 flex flex-col h-full overflow-hidden">
           {/* Tabs */}
           <div className="flex border-b border-slate-800 bg-slate-950/60 p-1">
             <button
-              onClick={() => setActiveTab('zones')}
+              onClick={() => { setActiveTab('zones'); cancelDrawing(); }}
               className={`flex-1 py-1.5 text-xs font-semibold rounded transition ${
                 activeTab === 'zones'
                   ? 'bg-slate-800 text-slate-100 shadow-sm'
@@ -198,7 +280,7 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
               Polygon Zones ({camera.zones?.length || 0})
             </button>
             <button
-              onClick={() => setActiveTab('fences')}
+              onClick={() => { setActiveTab('fences'); cancelDrawing(); }}
               className={`flex-1 py-1.5 text-xs font-semibold rounded transition ${
                 activeTab === 'fences'
                   ? 'bg-slate-800 text-slate-100 shadow-sm'
@@ -215,6 +297,40 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
               <div className="space-y-3">
                 <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 space-y-2">
                   <div className="font-semibold text-slate-200">Add Polygon Zone</div>
+
+                  {/* Draw on stream button */}
+                  <div className="flex items-center gap-2">
+                    {!drawingActive ? (
+                      <button
+                        onClick={startDrawing}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-blue-600/20 hover:bg-blue-600/40 border border-blue-500/40 text-blue-300 text-[11px] font-mono font-semibold transition w-full justify-center"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        {draftPolygon ? '✓ Re-draw on Stream' : 'Draw on Stream'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={cancelDrawing}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-rose-600/20 hover:bg-rose-600/40 border border-rose-500/40 text-rose-300 text-[11px] font-mono font-semibold transition w-full justify-center"
+                      >
+                        <XCircle className="w-3 h-3" />
+                        Cancel Drawing
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Show drawn coordinates badge */}
+                  {draftPolygon && (
+                    <div className="px-2 py-1 bg-blue-500/10 border border-blue-500/20 rounded text-[10px] font-mono text-blue-300">
+                      ✓ Polygon ready — {draftPolygon.length} vertices
+                    </div>
+                  )}
+                  {!draftPolygon && !drawingActive && (
+                    <div className="px-2 py-1 bg-slate-800/60 border border-slate-700/40 rounded text-[10px] font-mono text-slate-500">
+                      No polygon drawn — will use default full-frame zone
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     <input
                       type="text"
@@ -245,7 +361,7 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
                     </div>
                     <button
                       onClick={handleAddZone}
-                      disabled={isSaving || !newZoneName}
+                      disabled={!canSaveZone}
                       className="w-full py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded font-semibold transition flex items-center justify-center space-x-1.5"
                     >
                       <Plus className="w-3.5 h-3.5" />
@@ -268,7 +384,7 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
                         <div className="font-mono">
                           <div className="font-bold text-slate-200">{z.name}</div>
                           <div className="text-[10px] text-slate-400">
-                            Type: {z.type || 'restricted'} • Severity: {z.severity || 'high'}
+                            Type: {z.type || 'restricted'} • Severity: {z.severity || 'high'} • {z.polygon?.length || 0} pts
                           </div>
                         </div>
                         <button
@@ -290,6 +406,40 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
               <div className="space-y-3">
                 <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 space-y-2">
                   <div className="font-semibold text-slate-200">Add Virtual Tripwire Fence</div>
+
+                  {/* Draw on stream button */}
+                  <div className="flex items-center gap-2">
+                    {!drawingActive ? (
+                      <button
+                        onClick={startDrawing}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-yellow-600/20 hover:bg-yellow-600/40 border border-yellow-500/40 text-yellow-300 text-[11px] font-mono font-semibold transition w-full justify-center"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        {draftLine ? '✓ Re-draw on Stream' : 'Draw on Stream'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={cancelDrawing}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-rose-600/20 hover:bg-rose-600/40 border border-rose-500/40 text-rose-300 text-[11px] font-mono font-semibold transition w-full justify-center"
+                      >
+                        <XCircle className="w-3 h-3" />
+                        Cancel Drawing
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Show drawn line badge */}
+                  {draftLine && (
+                    <div className="px-2 py-1 bg-yellow-500/10 border border-yellow-500/20 rounded text-[10px] font-mono text-yellow-300">
+                      ✓ Line ready — [{draftLine.start[0]},{draftLine.start[1]}] → [{draftLine.end[0]},{draftLine.end[1]}]
+                    </div>
+                  )}
+                  {!draftLine && !drawingActive && (
+                    <div className="px-2 py-1 bg-slate-800/60 border border-slate-700/40 rounded text-[10px] font-mono text-slate-500">
+                      No line drawn — will use default horizontal line
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     <input
                       type="text"
@@ -310,7 +460,7 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
                     </select>
                     <button
                       onClick={handleAddFence}
-                      disabled={isSaving || !newLineName}
+                      disabled={!canSaveFence}
                       className="w-full py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded font-semibold transition flex items-center justify-center space-x-1.5"
                     >
                       <Plus className="w-3.5 h-3.5" />

@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   MapPin,
   Activity,
+  UserCheck,
 } from 'lucide-react';
 
 export type DashboardPage =
@@ -14,7 +15,8 @@ export type DashboardPage =
   | 'camera_detail'
   | 'incident_center'
   | 'map_view'
-  | 'system_health';
+  | 'system_health'
+  | 'face_registry';
 
 interface NavigationTabsProps {
   currentPage: DashboardPage;
@@ -39,6 +41,7 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
     },
     { id: 'map_view', label: 'Tactical Map', icon: MapPin },
     { id: 'system_health', label: 'Observability', icon: Activity },
+    { id: 'face_registry', label: 'Face Registry', icon: UserCheck },
   ];
 
   return (

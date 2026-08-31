@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +20,11 @@ try:
     from apps.backend import db
 except ImportError:
     import db
+
+try:
+    from apps.backend import face_utils
+except ImportError:
+    import face_utils  # type: ignore
 
 
 # Load Config
@@ -48,6 +54,32 @@ class CameraLocation(BaseModel):
     lng: Optional[float] = None
 
 
+class Zone(BaseModel):
+    name: str
+    polygon: List[List[float]]
+    classes: Optional[List[str]] = None
+    severity: Optional[str] = None
+    type: Optional[str] = None
+    threshold_s: Optional[float] = None
+
+
+class FenceLine(BaseModel):
+    name: str
+    start: List[float]
+    end: List[float]
+    direction: Optional[str] = "any"
+    classes: Optional[List[str]] = None
+    severity: Optional[str] = None
+
+
+class ZonesPayload(BaseModel):
+    zones: List[Zone]
+
+
+class FencePayload(BaseModel):
+    lines: List[FenceLine]
+
+
 class CameraCreatePayload(BaseModel):
     camera_id: str
     name: str
@@ -60,7 +92,37 @@ class CameraCreatePayload(BaseModel):
 class Camera(CameraCreatePayload):
     status: str = "OFFLINE"
     stream_url: Optional[str] = None
+    zones: Optional[List[Zone]] = None
+    lines: Optional[List[FenceLine]] = None
 
+
+# ─── Face Registry Models ─────────────────────────────────────────────────────
+
+class FaceRecord(BaseModel):
+    id: str
+    name: str
+    role: str  # 'SOLDIER' | 'INTRUDER'
+    notes: Optional[str] = None
+    image_b64: Optional[str] = None      # Thumbnail (small jpeg b64)
+    embedding_b64: Optional[str] = None  # LBPH histogram pickle b64 (edge only)
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class CreateFacePayload(BaseModel):
+    name: str
+    role: str  # 'SOLDIER' | 'INTRUDER'
+    notes: Optional[str] = None
+    image_b64: str  # Full resolution image for embedding computation
+
+
+class UpdateFacePayload(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    notes: Optional[str] = None
+
+
+# ─── In-memory runtime state ──────────────────────────────────────────────────
 
 # In-memory runtime state (must exist before any request handler runs)
 cameras: Dict[str, Camera] = {}
@@ -72,6 +134,10 @@ _latest_metrics: Dict[str, Any] = {}
 _in_memory_events: List[Dict[str, Any]] = []
 _in_memory_incidents: List[Dict[str, Any]] = []
 _MEMORY_CAP = 200
+
+# Face registry: {face_id -> FaceRecord}
+_face_registry: Dict[str, FaceRecord] = {}
+
 
 # Mount static video directory if exists
 VIDEOS_DIR = Path("data/videos")
@@ -206,6 +272,136 @@ async def delete_camera(camera_id: str):
         processes[camera_id].terminate()
         del processes[camera_id]
     del cameras[camera_id]
+    return {"success": True}
+
+
+@app.post("/api/cameras/{camera_id}/zones")
+async def update_camera_zones(camera_id: str, payload: ZonesPayload):
+    """Save polygon zones for a camera (in-memory)."""
+    _ensure_default_camera()
+    if camera_id not in cameras:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    cameras[camera_id].zones = payload.zones
+    return cameras[camera_id]
+
+
+@app.post("/api/cameras/{camera_id}/fence")
+async def update_camera_fence(camera_id: str, payload: FencePayload):
+    """Save virtual fence/tripwire lines for a camera (in-memory)."""
+    _ensure_default_camera()
+    if camera_id not in cameras:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    cameras[camera_id].lines = payload.lines
+    return cameras[camera_id]
+
+
+# ─── Face Registry Endpoints ──────────────────────────────────────────────────
+
+@app.get("/api/faces", response_model=List[FaceRecord])
+async def list_faces():
+    """Return all face records (thumbnails included, embeddings excluded for UI performance)."""
+    results = []
+    for rec in _face_registry.values():
+        # Return a copy without the heavy embedding_b64 for UI listing
+        results.append(
+            FaceRecord(
+                id=rec.id,
+                name=rec.name,
+                role=rec.role,
+                notes=rec.notes,
+                image_b64=rec.image_b64,
+                embedding_b64=None,  # excluded from UI listing
+                created_at=rec.created_at,
+                updated_at=rec.updated_at,
+            )
+        )
+    return results
+
+
+@app.post("/api/faces", response_model=FaceRecord)
+async def create_face(payload: CreateFacePayload):
+    """
+    Enroll a new face in the registry.
+    Accepts a base64-encoded image, computes an LBPH embedding, and stores
+    a compressed thumbnail alongside the embedding for edge-engine matching.
+    """
+    if not payload.name or not payload.image_b64:
+        raise HTTPException(status_code=400, detail="name and image_b64 are required")
+    if payload.role not in ("SOLDIER", "INTRUDER"):
+        raise HTTPException(status_code=400, detail="role must be SOLDIER or INTRUDER")
+
+    # Compute embedding
+    embedding_b64 = face_utils.compute_lbph_histogram(payload.image_b64)
+    if embedding_b64 is None:
+        raise HTTPException(status_code=422, detail="Failed to compute face embedding — check image quality")
+
+    now = datetime.now(timezone.utc).isoformat()
+    face_id = str(uuid.uuid4())
+
+    # Keep thumbnail at original (let frontend resize as needed — avoid re-encoding here)
+    record = FaceRecord(
+        id=face_id,
+        name=payload.name,
+        role=payload.role,
+        notes=payload.notes,
+        image_b64=payload.image_b64,
+        embedding_b64=embedding_b64,
+        created_at=now,
+        updated_at=now,
+    )
+    _face_registry[face_id] = record
+    # Return without embedding for the API response
+    return FaceRecord(
+        id=record.id, name=record.name, role=record.role, notes=record.notes,
+        image_b64=record.image_b64, created_at=record.created_at, updated_at=record.updated_at,
+    )
+
+
+@app.get("/api/faces/embeddings")
+async def get_face_embeddings():
+    """
+    Return all face records INCLUDING embeddings — used exclusively by the edge engine
+    to sync its local recognition model. Not intended for the dashboard UI.
+    """
+    return [
+        {
+            "id": rec.id,
+            "name": rec.name,
+            "role": rec.role,
+            "embedding_b64": rec.embedding_b64,
+        }
+        for rec in _face_registry.values()
+        if rec.embedding_b64
+    ]
+
+
+@app.put("/api/faces/{face_id}", response_model=FaceRecord)
+async def update_face(face_id: str, payload: UpdateFacePayload):
+    """Update name, role, or notes for an existing face record."""
+    if face_id not in _face_registry:
+        raise HTTPException(status_code=404, detail="Face record not found")
+    rec = _face_registry[face_id]
+    if payload.name is not None:
+        rec.name = payload.name
+    if payload.role is not None:
+        if payload.role not in ("SOLDIER", "INTRUDER"):
+            raise HTTPException(status_code=400, detail="role must be SOLDIER or INTRUDER")
+        rec.role = payload.role
+    if payload.notes is not None:
+        rec.notes = payload.notes
+    rec.updated_at = datetime.now(timezone.utc).isoformat()
+    return FaceRecord(
+        id=rec.id, name=rec.name, role=rec.role, notes=rec.notes,
+        image_b64=rec.image_b64, created_at=rec.created_at, updated_at=rec.updated_at,
+    )
+
+
+@app.delete("/api/faces/{face_id}")
+async def delete_face(face_id: str):
+    """Remove a face record from the registry."""
+    if face_id not in _face_registry:
+        raise HTTPException(status_code=404, detail="Face record not found")
+    del _face_registry[face_id]
     return {"success": True}
 
 

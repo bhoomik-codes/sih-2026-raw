@@ -32,6 +32,8 @@ from apps.edge.streamer import MJPEGStreamer
 from apps.edge.transmitter import EdgeTransmitter
 from apps.edge.video_source import Frame, VideoSource
 from cv.detection.base import Detection, DetectorBase
+from cv.face.face_detector import FaceDetector
+from cv.face.recognition_engine import FaceIdentity, FaceRecognitionEngine, UNKNOWN_IDENTITY
 from cv.preprocessing.frame_prep import build_preprocessing_pipeline
 from cv.tracking.byte_tracker import ByteTracker
 from intelligence.anpr.engine import ANPREngine
@@ -97,6 +99,30 @@ class EdgeProcessor:
 
         # --- ANPR Engine (Phase 5) ---
         self._anpr_engine = ANPREngine(config, cam_name)
+
+        # --- Face Recognition Engine ---
+        face_cfg = config.get("face_recognition", {})
+        self._face_recognition_enabled: bool = bool(face_cfg.get("enabled", True))
+        if self._face_recognition_enabled:
+            backend_http_url = face_cfg.get("backend_url", "http://localhost:8000")
+            poll_interval = float(face_cfg.get("poll_interval_s", 30.0))
+            match_threshold = float(face_cfg.get("match_threshold", 0.40))
+            self._face_detector = FaceDetector(
+                min_confidence=float(face_cfg.get("min_face_confidence", 0.5))
+            )
+            self._face_engine = FaceRecognitionEngine(
+                backend_url=backend_http_url,
+                poll_interval_s=poll_interval,
+                match_threshold=match_threshold,
+            )
+        else:
+            self._face_detector = None
+            self._face_engine = None
+
+        # Per-track recognized identities (reset on new detections)
+        self._recognized_tracks: dict[int, FaceIdentity] = {}
+        # Tracks for which an intruder alert has already been emitted this session
+        self._alerted_intruder_tracks: set[int] = set()
 
         # --- Processor settings ---
         # Merge output + processor so CLI --stream-port does not hide output.display
@@ -181,6 +207,9 @@ class EdgeProcessor:
         if self._transmitter:
             self._transmitter.start()
 
+        if self._face_engine:
+            self._face_engine.start()
+
         try:
             self._loop()
         except KeyboardInterrupt:
@@ -250,6 +279,95 @@ class EdgeProcessor:
                 # Run ANPR Engine
                 anpr_events = self._anpr_engine.update(frame.data, self._last_detections)
                 self._last_events.extend(anpr_events)
+
+                # --- Face Recognition ---
+                if self._face_recognition_enabled and self._face_engine and self._face_detector:
+                    current_track_ids: set[int] = set()
+                    for det in self._last_detections:
+                        if det.class_name != "person" or det.track_id is None:
+                            continue
+                        tid = det.track_id
+                        current_track_ids.add(tid)
+
+                        # Crop the person bounding box
+                        x1, y1 = max(0, int(det.bbox.x1)), max(0, int(det.bbox.y1))
+                        x2 = min(frame.data.shape[1] - 1, int(det.bbox.x2))
+                        y2 = min(frame.data.shape[0] - 1, int(det.bbox.y2))
+                        person_crop = frame.data[y1:y2, x1:x2]
+                        if person_crop.size == 0:
+                            continue
+
+                        # Run face detection on the person crop
+                        face_dets = self._face_detector.detect(
+                            person_crop, frame_id=frame.frame_id, timestamp=frame.timestamp
+                        )
+                        if not face_dets:
+                            continue
+
+                        # Use the highest-confidence face detection, crop it
+                        best_fd = max(face_dets, key=lambda fd: fd.confidence)
+                        fx1 = max(0, int(best_fd.bbox.x1))
+                        fy1 = max(0, int(best_fd.bbox.y1))
+                        fx2 = min(person_crop.shape[1] - 1, int(best_fd.bbox.x2))
+                        fy2 = min(person_crop.shape[0] - 1, int(best_fd.bbox.y2))
+                        face_crop = person_crop[fy1:fy2, fx1:fx2]
+                        if face_crop.size == 0:
+                            continue
+
+                        # Identify the face
+                        identity = self._face_engine.identify(face_crop, track_id=tid)
+                        self._recognized_tracks[tid] = identity
+
+                        # INTRUDER detected → emit immediate critical event
+                        if (
+                            identity.role == "INTRUDER"
+                            and tid not in self._alerted_intruder_tracks
+                            and self._transmitter
+                        ):
+                            self._alerted_intruder_tracks.add(tid)
+                            intruder_ev = {
+                                "event_type": "FACE_IDENTIFIED_INTRUDER",
+                                "severity": "CRITICAL",
+                                "track_id": tid,
+                                "camera_name": self._source.name,
+                                "timestamp": frame.timestamp,
+                                "frame_id": frame.frame_id,
+                                "class_name": "person",
+                                "confidence": identity.confidence,
+                                "rule_name": "face:intruder_match",
+                                "details": {
+                                    "face_id": identity.id,
+                                    "name": identity.name,
+                                    "match_distance": identity.match_distance,
+                                },
+                            }
+                            self._transmitter.emit_event(intruder_ev)
+                            logger.warning(
+                                "INTRUDER IDENTIFIED: %s (track #%d, dist=%.3f)",
+                                identity.name, tid, identity.match_distance,
+                            )
+
+                    # Invalidate cache for tracks that have disappeared
+                    for vanished_tid in list(self._recognized_tracks.keys()):
+                        if vanished_tid not in current_track_ids:
+                            self._recognized_tracks.pop(vanished_tid, None)
+                            self._face_engine.invalidate_track(vanished_tid)
+
+                # --- Suppress events for recognized SOLDIER tracks ---
+                soldier_track_ids = {
+                    tid
+                    for tid, ident in self._recognized_tracks.items()
+                    if ident.role == "SOLDIER"
+                }
+                if soldier_track_ids:
+                    original_count = len(self._last_events)
+                    self._last_events = [
+                        ev for ev in self._last_events
+                        if ev.track_id not in soldier_track_ids
+                    ]
+                    suppressed = original_count - len(self._last_events)
+                    if suppressed:
+                        logger.debug("Suppressed %d events for recognized soldier tracks", suppressed)
 
                 # Transmit events to Command Center Backend
                 if self._transmitter and self._last_events:
@@ -462,6 +580,33 @@ class EdgeProcessor:
                 lineType=cv2.LINE_AA,
             )
 
+            # --- Face Identity Overlay ---
+            if det.class_name == "person" and det.track_id is not None:
+                identity = self._recognized_tracks.get(det.track_id)
+                if identity and identity.role != "UNKNOWN":
+                    if identity.role == "SOLDIER":
+                        id_colour = (0, 220, 80)   # BGR: bright green
+                        id_label = f"[SOLDIER] {identity.name[:16]}"
+                    else:  # INTRUDER
+                        id_colour = (0, 0, 220)    # BGR: red
+                        id_label = f"[INTRUDER] {identity.name[:14]}"
+
+                    (ilw, ilh), ibl = cv2.getTextSize(id_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                    # Draw below the bbox
+                    iy1 = y2 + 1
+                    iy2 = y2 + ilh + ibl + 4
+                    cv2.rectangle(out, (x1, iy1), (x1 + ilw + 4, iy2), id_colour, cv2.FILLED)
+                    cv2.putText(
+                        out,
+                        id_label,
+                        (x1 + 2, iy2 - ibl - 1),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 0, 0),
+                        thickness=1,
+                        lineType=cv2.LINE_AA,
+                    )
+
         # HUD: FPS + detections count (top-left corner)
         return out
 
@@ -634,5 +779,8 @@ class EdgeProcessor:
 
         if self._transmitter:
             self._transmitter.stop()
+
+        if self._face_engine:
+            self._face_engine.stop()
 
         logger.info("EdgeProcessor shut down cleanly.")

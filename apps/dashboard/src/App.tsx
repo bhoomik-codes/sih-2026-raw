@@ -18,6 +18,7 @@ import { CameraDetailPage } from './pages/CameraDetailPage';
 import { IncidentCenterPage } from './pages/IncidentCenterPage';
 import { MapViewPage } from './pages/MapViewPage';
 import { SystemHealthPage } from './pages/SystemHealthPage';
+import { FaceRegistryPage } from './pages/FaceRegistryPage';
 
 export const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<DashboardPage>('command_center');
@@ -177,6 +178,8 @@ export const App: React.FC = () => {
             onRefresh={refreshMetrics}
           />
         );
+      case 'face_registry':
+        return <FaceRegistryPage />;
       default:
         return null;
     }
