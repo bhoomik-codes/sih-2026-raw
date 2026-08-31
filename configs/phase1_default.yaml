@@ -1,74 +1,81 @@
-# Camera configuration
-camera:
-  source: "data/videos/border_crossing_test.mp4"
-  name: "BOP-CAM-01"
-  max_queue_size: 2
-  reconnect_delay_s: 3.0
-
-# Detector configuration
-detector:
-  model: "yolov8n.pt"
-  device: "cpu"
-  conf_threshold: 0.25
-  iou_threshold: 0.45
-  imgsz: 640
-  inference_every_n_frames: 2
-  half: false
-  verbose: false
-
-# Preprocessing
-preprocessing:
-  low_light: false
-  roi_polygon: null
-
-# Tracker
-tracker:
-  type: "bytetrack"
-  track_buffer: 30
-  match_thresh: 0.8
-
-# Event Engine Rules
-event_engine:
-  enabled: true
-  zones:
-    - name: "Restricted_Border_Sector_A"
-      polygon: [[50, 100], [900, 100], [900, 700], [50, 700]]
-      classes: ["person", "car", "truck"]
-      severity: "high"
-  lines:
-    - name: "Zero_Line_Perimeter"
-      start: [50, 350]
-      end: [900, 350]
-      direction: "any"
-      severity: "critical"
-  loitering_zones:
-    - name: "Patrol_Check_Zone"
-      polygon: [[100, 100], [800, 100], [800, 600], [100, 600]]
-      threshold_s: 2.0
-      classes: ["person"]
-      severity: "medium"
-
-# ANPR Engine
 anpr_engine:
   enabled: true
   min_crop_area: 1200
   watchlist:
-    - "DL01AB1234"
-    - "MH12XY9999"
-
-# Incident Generation & Risk Scoring
+  - DL01AB1234
+  - MH12XY9999
+camera:
+  max_queue_size: 2
+  name: BOP-CAM-01
+  reconnect_delay_s: 3.0
+  source: data/videos/border_crossing_test.mp4
+detector:
+  conf_threshold: 0.25
+  device: cpu
+  half: false
+  imgsz: 640
+  inference_every_n_frames: 2
+  iou_threshold: 0.45
+  model: yolov8n.pt
+  verbose: false
+event_engine:
+  enabled: true
+  lines:
+  - direction: any
+    end:
+    - 900
+    - 350
+    name: Zero_Line_Perimeter
+    severity: critical
+    start:
+    - 50
+    - 350
+  loitering_zones:
+  - classes:
+    - person
+    name: Patrol_Check_Zone
+    polygon:
+    - - 100
+      - 100
+    - - 800
+      - 100
+    - - 800
+      - 600
+    - - 100
+      - 600
+    severity: medium
+    threshold_s: 2.0
+  zones:
+  - classes:
+    - person
+    - car
+    - truck
+    name: Restricted_Border_Sector_A
+    polygon:
+    - - 50
+      - 100
+    - - 900
+      - 100
+    - - 900
+      - 700
+    - - 50
+      - 700
+    severity: high
 incidents:
+  cooldown_s: 3.0
   enabled: true
   escalation_threshold: 40
-  cooldown_s: 3.0
-
-# WebSocket Live Transmitter to Backend
-transmitter:
-  enabled: true
-  backend_ws_url: "ws://localhost:8000/ws"
-
-# Output and display
 output:
   display: false
-  save_annotated: false
   metrics_print_every_n: 20
+  save_annotated: false
+preprocessing:
+  low_light: false
+  roi_polygon: null
+tracker:
+  match_thresh: 0.8
+  track_buffer: 30
+  type: bytetrack
+transmitter:
+  backend_ws_url: ws://10.98.121.113:8000/ws
+  enabled: true

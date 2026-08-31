@@ -1,4 +1,4 @@
-﻿# Phase 8 — Multi-Camera / GStreamer Pipeline Configuration
+# Phase 8 — Multi-Camera / GStreamer Pipeline Configuration
 # Runs 2 cameras concurrently using the same test video to simulate
 # a multi-stream border surveillance deployment.
 #
@@ -8,7 +8,7 @@
 # --- Multi-camera list (Phase 8) ---
 cameras:
   - id: "BOP-CAM-01"
-    source: "data/videos/test_video.mp4"
+    source: "http://100.93.111.50:8080/video"
     name: "Border East Fence"
     pipeline: "opencv"            # Use "gstreamer" for hardware-decode path
     max_queue_size: 2
@@ -110,3 +110,8 @@ output:
   output_video_path: null
   metrics_csv: "benchmarks/phase8_run.csv"   # Per-camera: appended with camera_id
   metrics_print_every_n: 30
+
+transmitter:
+  enabled: true
+  # Change localhost to Laptop 2's IP!
+  backend_ws_url: "ws://localhost:8000/ws" 
