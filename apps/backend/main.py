@@ -185,44 +185,16 @@ def _incident_key(inc: Dict[str, Any]) -> str:
 
 def _ensure_default_camera():
     """Ensure at least default camera is registered if store is empty."""
-    if not cameras:
-        if db.db_enabled():
-            try:
-                res = db.get_db().table("cameras").select("*").execute()
-                for c in (res.data or []):
-                    cid = c.get("id") or c.get("camera_code", "CAM-01")
-                    cameras[cid] = Camera(
-                        camera_id=cid,
-                        name=c.get("name", cid),
-                        source_url=c.get("source_url", "data/videos/border_crossing_test.mp4"),
-                        source_type=c.get("source_type", "file"),
-                        status=c.get("status", "ONLINE"),
-                        stream_url=f"http://localhost:8081/stream",
-                        inference_enabled=True,
-                    )
-            except Exception:
-                pass
-        if not cameras:
-            cameras["BOP-CAM-01"] = Camera(
-                camera_id="BOP-CAM-01",
-                name="Border Outpost Cam 01",
-                source_url="data/videos/border_crossing_test.mp4",
-                source_type="file",
-                status="ONLINE",
-                stream_url="http://localhost:8081/stream",
-                inference_enabled=True,
-            )
+    pass
 
 
 @app.get("/api/cameras", response_model=List[Camera])
 async def get_cameras():
-    _ensure_default_camera()
     return list(cameras.values())
 
 
 @app.get("/api/cameras/{camera_id}", response_model=Camera)
 async def get_camera(camera_id: str):
-    _ensure_default_camera()
     if camera_id not in cameras:
         raise HTTPException(status_code=404, detail="Camera not found")
     return cameras[camera_id]
@@ -231,7 +203,6 @@ async def get_camera(camera_id: str):
 @app.get("/api/streams/{camera_id}")
 async def get_camera_stream(camera_id: str):
     """Proxy or redirect stream endpoint for the given camera."""
-    _ensure_default_camera()
     cam = cameras.get(camera_id)
     if not cam:
         raise HTTPException(status_code=404, detail="Camera not found")
@@ -253,6 +224,39 @@ async def list_videos():
             "url": f"/api/videos/files/{f.name}"
         })
     return video_files
+
+
+@app.get("/api/utils/select-file")
+async def select_local_file():
+    """Open a native OS file dialog to select a video file and return its absolute path."""
+    import tkinter as tk
+    from tkinter import filedialog
+    import threading
+
+    result = {"path": None}
+
+    def open_dialog():
+        root = tk.Tk()
+        root.attributes("-topmost", True)
+        root.withdraw()
+        file_path = filedialog.askopenfilename(
+            title="Select Video File for Edge AI",
+            filetypes=(
+                ("Video files", "*.mp4 *.avi *.mkv *.mov *.webm"),
+                ("All files", "*.*")
+            )
+        )
+        result["path"] = file_path
+        root.destroy()
+
+    t = threading.Thread(target=open_dialog)
+    t.start()
+    t.join()
+
+    if not result["path"]:
+        raise HTTPException(status_code=400, detail="No file selected")
+    
+    return {"path": result["path"]}
 
 
 @app.post("/api/cameras", response_model=Camera)
@@ -424,6 +428,8 @@ async def start_camera(camera_id: str):
         "apps.edge.main",
         "--source",
         cam.source_url,
+        "--camera-id",
+        camera_id,
         "--stream-port",
         str(assigned_port),
     ]

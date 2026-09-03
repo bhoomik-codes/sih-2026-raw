@@ -1,5 +1,5 @@
 import React from 'react';
-import { Cctv, RefreshCw } from 'lucide-react';
+import { Cctv, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import { Camera } from '../../types/camera';
 import { LoadingState } from '../common/LoadingState';
 import { EmptyState } from '../common/EmptyState';
@@ -22,37 +22,52 @@ export const CameraList: React.FC<CameraListProps> = ({
   error,
   onRefresh,
 }) => {
-  const getStatusColor = (status: Camera['status']) => {
+  const getStatusDot = (status: Camera['status']) => {
     switch (status) {
-      case 'ONLINE':
-        return 'bg-emerald-400';
-      case 'CONNECTING':
-        return 'bg-blue-400 animate-pulse';
-      case 'ERROR':
-        return 'bg-rose-500';
-      default:
-        return 'bg-slate-500';
+      case 'ONLINE':     return { bg: '#00ff88', shadow: '0 0 6px #00ff88', anim: 'animate-pulse-glow' };
+      case 'CONNECTING': return { bg: '#00d4ff', shadow: '0 0 6px #00d4ff', anim: 'animate-pulse' };
+      case 'ERROR':      return { bg: '#ff3232', shadow: '0 0 6px #ff3232', anim: '' };
+      default:           return { bg: 'rgba(0,212,255,0.2)', shadow: 'none', anim: '' };
     }
   };
 
+  const onlineCount = cameras.filter(c => c.status === 'ONLINE').length;
+
   return (
-    <div className="bg-[#151c27] rounded-sm border border-[#232a36] flex flex-col h-full overflow-hidden">
+    <div
+      className="flex flex-col h-full overflow-hidden animate-fade-in"
+      style={{
+        background: 'rgba(2,8,20,0.92)',
+        border: '1px solid rgba(0,212,255,0.15)',
+        borderRadius: '4px',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+      }}
+    >
       {/* Header */}
-      <div className="px-3 py-2 bg-[#19202b] border-b border-[#232a36] flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <Cctv className="w-3.5 h-3.5 text-[#8f9195]" />
-          <span className="text-[11px] font-mono font-bold text-[#dce2f3] uppercase tracking-wider">
-            CAMERA_MATRIX
+      <div
+        className="px-3 py-2 flex items-center justify-between flex-shrink-0"
+        style={{
+          background: 'rgba(0,8,20,0.85)',
+          borderBottom: '1px solid rgba(0,212,255,0.12)',
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <Cctv className="w-3.5 h-3.5" style={{ color: 'rgba(0,212,255,0.6)' }} />
+          <span className="font-mono text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: 'rgba(0,212,255,0.75)' }}>
+            NODES
           </span>
         </div>
-        <div className="flex items-center space-x-2">
-          <span className="text-[10px] font-mono text-[#8f9195] font-semibold">
-            [{cameras.length} NODES]
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[9px]" style={{ color: 'rgba(0,255,136,0.6)' }}>
+            {onlineCount}/{cameras.length}
           </span>
           <button
             onClick={onRefresh}
-            className="p-1 rounded-sm text-[#8f9195] hover:text-[#dce2f3] hover:bg-[#232a36] transition"
+            className="p-1 rounded-sm transition-all"
             title="Refresh Cameras"
+            style={{ color: 'rgba(0,212,255,0.4)' }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#00d4ff')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'rgba(0,212,255,0.4)')}
           >
             <RefreshCw className="w-3 h-3" />
           </button>
@@ -62,39 +77,54 @@ export const CameraList: React.FC<CameraListProps> = ({
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
         {isLoading && cameras.length === 0 ? (
-          <LoadingState message="Loading cameras..." className="py-6" />
+          <LoadingState message="Scanning network..." className="py-6" />
         ) : error && cameras.length === 0 ? (
           <ErrorState message={error} onRetry={onRefresh} className="p-3" />
         ) : cameras.length === 0 ? (
-          <EmptyState title="No cameras available" message="No video sources configured on edge node" className="py-6" />
+          <EmptyState title="No cameras" message="No video sources configured" className="py-6" />
         ) : (
           cameras.map((cam) => {
             const isSelected = cam.camera_id === selectedCameraId;
+            const dot = getStatusDot(cam.status);
             return (
               <button
                 key={cam.camera_id}
                 onClick={() => onSelectCamera(cam.camera_id)}
-                className={`w-full text-left p-2 rounded-sm border transition flex items-center justify-between ${
-                  isSelected
-                    ? 'bg-[#19202b] border-l-2 border-l-blue-400 border-t-[#232a36] border-r-[#232a36] border-b-[#232a36] text-[#dce2f3]'
-                    : 'bg-[#0c141f]/70 border-[#232a36]/60 hover:bg-[#19202b]/60 text-[#c5c6cb]'
-                }`}
+                className="w-full text-left p-2 rounded-sm transition-all duration-150 flex items-center justify-between group"
+                style={{
+                  background: isSelected ? 'rgba(0,212,255,0.08)' : 'rgba(0,8,20,0.5)',
+                  border: isSelected
+                    ? '1px solid rgba(0,212,255,0.45)'
+                    : '1px solid rgba(0,212,255,0.06)',
+                  boxShadow: isSelected ? '0 0 10px rgba(0,212,255,0.1)' : 'none',
+                }}
               >
-                <div className="flex items-center space-x-2 overflow-hidden">
-                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${getStatusColor(cam.status)}`} />
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot.anim}`}
+                    style={{ background: dot.bg, boxShadow: dot.shadow }}
+                  />
                   <div className="truncate">
-                    <div className="text-xs font-semibold truncate text-[#dce2f3] font-sans">
+                    <div className="text-[11px] font-semibold truncate" style={{ color: isSelected ? '#00d4ff' : '#c8d6f0' }}>
                       {cam.name || cam.camera_id}
                     </div>
-                    <div className="text-[10px] font-mono text-[#8f9195] truncate">
+                    <div className="text-[9px] font-mono truncate" style={{ color: 'rgba(0,212,255,0.35)' }}>
                       {cam.camera_id}
                     </div>
                   </div>
                 </div>
-
-                <div className="text-[9px] font-mono font-bold text-[#8f9195] uppercase ml-2 flex-shrink-0 tracking-wider">
-                  {cam.status}
-                </div>
+                <span
+                  className="text-[9px] font-mono font-bold uppercase ml-1 flex-shrink-0 tracking-wider"
+                  style={{
+                    color: cam.status === 'ONLINE'
+                      ? 'rgba(0,255,136,0.7)'
+                      : cam.status === 'CONNECTING'
+                        ? 'rgba(0,212,255,0.6)'
+                        : 'rgba(255,50,50,0.6)',
+                  }}
+                >
+                  {cam.status === 'ONLINE' ? 'ON' : cam.status === 'CONNECTING' ? '...' : 'OFF'}
+                </span>
               </button>
             );
           })

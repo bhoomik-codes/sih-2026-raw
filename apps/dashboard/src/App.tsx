@@ -186,7 +186,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden font-sans select-none">
+    <div className="h-screen w-screen flex flex-col overflow-hidden font-sans select-none" style={{ background: '#020810', color: '#c8d6f0' }}>
       {/* Top Application Header */}
       <Header
         healthStatus={healthStatus}

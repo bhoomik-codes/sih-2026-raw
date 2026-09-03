@@ -114,12 +114,16 @@ class VirtualFenceEngine:
     def __init__(self, zones_config: List[dict], camera_name: str) -> None:
         self._camera_name = camera_name
         self._zones: List[_Zone] = []
+        self.update_zones(zones_config)
 
+    def update_zones(self, zones_config: List[dict]) -> None:
+        new_zones = []
         for z in zones_config:
             polygon = np.array(z["polygon"], dtype=np.int32)
             classes = set(z["classes"]) if z.get("classes") else None
             severity = EventSeverity[z.get("severity", "high").upper()]
-            self._zones.append(_Zone(z["name"], polygon, classes, severity))
+            new_zones.append(_Zone(z["name"], polygon, classes, severity))
+        self._zones = new_zones
 
     def update(self, detections: List[Detection]) -> List[SurveillanceEvent]:
         """

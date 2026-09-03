@@ -2,84 +2,218 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Google Fonts are loaded in index.html ────────────────────────────────── */
+
+/* ── CSS Custom Properties ────────────────────────────────────────────────── */
+:root {
+  --glow-cyan: 0 0 8px rgba(0, 212, 255, 0.6), 0 0 20px rgba(0, 212, 255, 0.2);
+  --glow-amber: 0 0 8px rgba(255, 184, 0, 0.6), 0 0 20px rgba(255, 184, 0, 0.15);
+  --glow-red: 0 0 8px rgba(255, 50, 50, 0.7), 0 0 20px rgba(255, 50, 50, 0.2);
+  --glow-green: 0 0 8px rgba(0, 255, 136, 0.5), 0 0 20px rgba(0, 255, 136, 0.1);
+  --border-cyan: rgba(0, 212, 255, 0.35);
+  --border-amber: rgba(255, 184, 0, 0.35);
+  --bg-glass: rgba(8, 20, 40, 0.72);
+  --bg-glass-dark: rgba(2, 8, 16, 0.85);
+  --surface-panel: rgba(10, 22, 44, 0.9);
+}
+
+/* ── Base Reset ───────────────────────────────────────────────────────────── */
 @layer base {
+  html {
+    background-color: #020810;
+  }
+
   body {
-    background-color: #0c141f;
-    color: #dce2f3;
-    font-family: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background-color: #020810;
+    color: #c8d6f0;
+    font-family: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     margin: 0;
     overflow: hidden;
+    /* subtle dark grid pattern */
+    background-image:
+      linear-gradient(rgba(0, 212, 255, 0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 212, 255, 0.02) 1px, transparent 1px);
+    background-size: 40px 40px;
   }
 
   /* Tactical custom scrollbar */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: #070e19;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: #232a36;
-    border-radius: 2px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #45474a;
-  }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: #020810; }
+  ::-webkit-scrollbar-thumb { background: rgba(0, 212, 255, 0.2); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(0, 212, 255, 0.4); }
 }
 
-/* Tactical Panel Cell */
-.tactical-cell {
-  background-color: #19202b;
-  border: 1px solid #232a36;
+/* ── Glassmorphism Panels ─────────────────────────────────────────────────── */
+.glass-panel {
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-cyan);
   border-radius: 4px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(0, 212, 255, 0.08);
 }
 
-/* Tactical Severity Left Stripe Chips */
+.glass-panel-dark {
+  background: var(--bg-glass-dark);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 4px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(0, 212, 255, 0.05);
+}
+
+/* ── Tactical Panel (base surface) ───────────────────────────────────────── */
+.tactical-cell {
+  background-color: rgba(10, 22, 44, 0.88);
+  border: 1px solid rgba(0, 212, 255, 0.15);
+  border-radius: 3px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  transition: border-color 0.2s ease;
+}
+
+.tactical-cell:hover {
+  border-color: rgba(0, 212, 255, 0.28);
+}
+
+/* ── Bracket Corner Decorations ───────────────────────────────────────────── */
+.bracket-corners {
+  position: relative;
+}
+.bracket-corners::before,
+.bracket-corners::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-color: rgba(0, 212, 255, 0.7);
+  border-style: solid;
+  z-index: 10;
+}
+.bracket-corners::before {
+  top: 3px; left: 3px;
+  border-width: 1.5px 0 0 1.5px;
+}
+.bracket-corners::after {
+  bottom: 3px; right: 3px;
+  border-width: 0 1.5px 1.5px 0;
+}
+
+/* ── Glow Effects ─────────────────────────────────────────────────────────── */
+.glow-cyan { box-shadow: var(--glow-cyan); }
+.glow-amber { box-shadow: var(--glow-amber); }
+.glow-red { box-shadow: var(--glow-red); }
+.glow-green { box-shadow: var(--glow-green); }
+
+.text-glow-cyan { text-shadow: 0 0 10px rgba(0, 212, 255, 0.8), 0 0 20px rgba(0, 212, 255, 0.4); }
+.text-glow-amber { text-shadow: 0 0 10px rgba(255, 184, 0, 0.8), 0 0 20px rgba(255, 184, 0, 0.4); }
+
+/* ── Severity Left Stripe Chips (updated glow) ────────────────────────────── */
 .severity-critical {
-  border-left: 3px solid #ef4444 !important;
-  background-color: rgba(239, 68, 68, 0.08);
+  border-left: 2px solid rgba(255, 50, 50, 0.9) !important;
+  background-color: rgba(255, 50, 50, 0.06);
+  box-shadow: inset 2px 0 8px rgba(255, 50, 50, 0.12);
 }
 .severity-high {
-  border-left: 3px solid #f97316 !important;
-  background-color: rgba(249, 115, 22, 0.08);
+  border-left: 2px solid rgba(255, 140, 0, 0.9) !important;
+  background-color: rgba(255, 140, 0, 0.06);
+  box-shadow: inset 2px 0 8px rgba(255, 140, 0, 0.12);
 }
 .severity-medium {
-  border-left: 3px solid #eab308 !important;
-  background-color: rgba(234, 179, 8, 0.08);
+  border-left: 2px solid rgba(255, 184, 0, 0.9) !important;
+  background-color: rgba(255, 184, 0, 0.06);
 }
 .severity-low {
-  border-left: 3px solid #06b6d4 !important;
-  background-color: rgba(6, 182, 212, 0.08);
+  border-left: 2px solid rgba(0, 212, 255, 0.7) !important;
+  background-color: rgba(0, 212, 255, 0.05);
 }
 
-/* Leaflet clean dark map */
+/* ── Scan Line Overlay ────────────────────────────────────────────────────── */
+.scan-overlay {
+  position: relative;
+  overflow: hidden;
+}
+.scan-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(0, 0, 0, 0.06) 3px,
+    rgba(0, 0, 0, 0.06) 4px
+  );
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* ── Moving scanline sweep ────────────────────────────────────────────────── */
+.scan-sweep {
+  position: relative;
+  overflow: hidden;
+}
+.scan-sweep::before {
+  content: '';
+  position: absolute;
+  top: -100%;
+  left: 0;
+  right: 0;
+  height: 60%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(0, 212, 255, 0.025),
+    transparent
+  );
+  animation: scanline-sweep 5s linear infinite;
+  pointer-events: none;
+  z-index: 6;
+}
+
+/* ── Camera Stream Frame (crossfade) ──────────────────────────────────────── */
+.stream-frame {
+  image-rendering: auto;
+  transition: opacity 0.15s ease-in-out;
+}
+
+/* ── Active Camera Highlight ──────────────────────────────────────────────── */
+.camera-active-border {
+  border: 1.5px solid rgba(0, 212, 255, 0.8) !important;
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.3), inset 0 0 12px rgba(0, 212, 255, 0.04);
+}
+
+/* ── Leaflet dark map ─────────────────────────────────────────────────────── */
 .leaflet-container {
-  background-color: #070e19 !important;
+  background-color: #020810 !important;
   font-family: 'Hanken Grotesk', sans-serif;
 }
 .leaflet-popup-content-wrapper, .leaflet-popup-tip {
-  background: #19202b !important;
-  color: #dce2f3 !important;
-  border: 1px solid #374151 !important;
-  border-radius: 2px !important;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5) !important;
+  background: rgba(8, 20, 40, 0.95) !important;
+  color: #c8d6f0 !important;
+  border: 1px solid var(--border-cyan) !important;
+  border-radius: 3px !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.7) !important;
 }
 .leaflet-popup-content {
   margin: 8px 10px !important;
   line-height: 1.3 !important;
 }
 
-/* ── Alert Toast Animations ─────────────────────────────────────────────────── */
+/* ── Keyframe Animations ──────────────────────────────────────────────────── */
+
+@keyframes scanline-sweep {
+  0%   { top: -60%; }
+  100% { top: 110%; }
+}
+
 @keyframes slide-in-right {
-  from {
-    opacity: 0;
-    transform: translateX(110%) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
+  from { opacity: 0; transform: translateX(110%) scale(0.97); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+@keyframes slide-in-up {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @keyframes shrink-width {
@@ -87,15 +221,121 @@
   to   { width: 0%; }
 }
 
-.animate-slide-in-right {
-  animation: slide-in-right 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+@keyframes ping-slow {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50%       { opacity: 0; transform: scale(1.4); }
 }
 
-/* ── Risk Gauge pulse ring on CRITICAL ─────────────────────────────────────── */
-@keyframes ping-slow {
-  0%, 100% { opacity: 0.4; transform: scale(1); }
-  50% { opacity: 0.1; transform: scale(1.15); }
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px rgba(0, 255, 136, 0.6); }
+  50%       { opacity: 0.7; box-shadow: 0 0 12px rgba(0, 255, 136, 0.9); }
 }
-.animate-ping-slow {
-  animation: ping-slow 2s ease-in-out infinite;
+
+@keyframes blink-rec {
+  0%, 49%  { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+@keyframes border-glow-pulse {
+  0%, 100% { border-color: rgba(0, 212, 255, 0.3); box-shadow: 0 0 6px rgba(0, 212, 255, 0.15); }
+  50%       { border-color: rgba(0, 212, 255, 0.7); box-shadow: 0 0 16px rgba(0, 212, 255, 0.35); }
+}
+
+@keyframes glitch {
+  0%, 96%, 100% { transform: none; }
+  97%            { transform: translate(-2px, 0) skewX(-1deg); }
+  98%            { transform: translate(2px, 0) skewX(1deg); }
+  99%            { transform: translate(0, -1px); }
+}
+
+@keyframes nav-tab-appear {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Animation Utility Classes ────────────────────────────────────────────── */
+.animate-slide-in-right  { animation: slide-in-right 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-slide-in-up     { animation: slide-in-up 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-ping-slow       { animation: ping-slow 2.2s ease-in-out infinite; }
+.animate-pulse-glow      { animation: pulse-glow 2s ease-in-out infinite; }
+.animate-blink-rec       { animation: blink-rec 1.2s step-end infinite; }
+.animate-border-glow     { animation: border-glow-pulse 3s ease-in-out infinite; }
+.animate-glitch          { animation: glitch 6s infinite; }
+.animate-fade-in         { animation: fade-in 0.3s ease-out forwards; }
+
+/* ── Nav Tab Glow Underline ───────────────────────────────────────────────── */
+.nav-tab-active {
+  position: relative;
+  color: #00d4ff;
+  background: rgba(0, 212, 255, 0.07);
+}
+.nav-tab-active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 10%;
+  width: 80%;
+  height: 1.5px;
+  background: linear-gradient(90deg, transparent, #00d4ff, transparent);
+  box-shadow: 0 0 8px #00d4ff, 0 0 16px rgba(0, 212, 255, 0.5);
+}
+
+/* ── HUD Corner Brackets (explicit classes) ───────────────────────────────── */
+.hud-tl::before {
+  content: '';
+  position: absolute;
+  top: 4px; left: 4px;
+  width: 12px; height: 12px;
+  border-top: 1.5px solid rgba(0, 212, 255, 0.6);
+  border-left: 1.5px solid rgba(0, 212, 255, 0.6);
+  pointer-events: none;
+}
+.hud-br::after {
+  content: '';
+  position: absolute;
+  bottom: 4px; right: 4px;
+  width: 12px; height: 12px;
+  border-bottom: 1.5px solid rgba(0, 212, 255, 0.6);
+  border-right: 1.5px solid rgba(0, 212, 255, 0.6);
+  pointer-events: none;
+}
+
+/* ── Live badge ───────────────────────────────────────────────────────────── */
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.15em;
+  color: #00ff88;
+  text-transform: uppercase;
+  background: rgba(0, 255, 136, 0.08);
+  border: 1px solid rgba(0, 255, 136, 0.25);
+  border-radius: 2px;
+  padding: 1px 5px;
+}
+.live-badge .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #00ff88;
+  box-shadow: 0 0 6px #00ff88;
+  animation: pulse-glow 1.5s ease-in-out infinite;
+}
+
+/* ── Light Mode (Automatic via OS Prefers-Color-Scheme) ───────────────────── */
+@media (prefers-color-scheme: light) {
+  html {
+    filter: invert(1) hue-rotate(180deg);
+  }
+  /* Double invert images, videos, and maps to preserve their original colors */
+  img, video, canvas, .stream-frame, .leaflet-container {
+    filter: invert(1) hue-rotate(180deg);
+  }
 }

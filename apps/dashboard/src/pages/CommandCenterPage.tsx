@@ -59,11 +59,12 @@ export const CommandCenterPage: React.FC<CommandCenterPageProps> = ({
   metricsError,
 }) => {
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden p-3 gap-3">
-      {/* Upper 3-Column Surveillance Matrix */}
-      <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 min-h-0">
-        {/* Left Column: Camera List (3 cols) */}
-        <div className="md:col-span-3 h-full min-h-[220px]">
+    <div className="flex-1 flex flex-col h-full overflow-hidden p-2.5 gap-2.5">
+      {/* ── Upper 3-Column Surveillance Matrix ─────────────────────────────── */}
+      <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-2.5 min-h-0">
+
+        {/* Left Column: Camera Node List (2 cols) */}
+        <div className="md:col-span-2 h-full min-h-[220px]">
           <CameraList
             cameras={cameras}
             selectedCameraId={selectedCameraId}
@@ -74,10 +75,12 @@ export const CommandCenterPage: React.FC<CommandCenterPageProps> = ({
           />
         </div>
 
-        {/* Center Column: Live Camera Grid (6 cols) */}
-        <div className="md:col-span-6 h-full min-h-[300px]">
+        {/* Center Column: Multi-Camera Mosaic (7 cols) */}
+        <div className="md:col-span-7 h-full min-h-[300px]">
           <CameraGrid
-            camera={selectedCamera}
+            cameras={cameras}
+            selectedCameraId={selectedCameraId}
+            onSelectCamera={onSelectCamera}
             isLoading={camerasLoading}
             error={camerasError}
           />
@@ -95,8 +98,8 @@ export const CommandCenterPage: React.FC<CommandCenterPageProps> = ({
         </div>
       </div>
 
-      {/* Lower Section: Event Timeline (fixed height) */}
-      <div className="h-44 flex-shrink-0">
+      {/* ── Lower Section: Event Timeline ───────────────────────────────────── */}
+      <div className="h-40 flex-shrink-0">
         <EventTimeline
           events={events}
           isLoading={eventsLoading}
@@ -105,7 +108,7 @@ export const CommandCenterPage: React.FC<CommandCenterPageProps> = ({
         />
       </div>
 
-      {/* Bottom Section: System Health */}
+      {/* ── Bottom: System Health Bar ───────────────────────────────────────── */}
       <div className="flex-shrink-0">
         <SystemHealthBar
           metrics={metrics}

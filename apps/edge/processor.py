@@ -140,6 +140,7 @@ class EdgeProcessor:
         stream_port = proc.get("stream_port")
         if stream_port:
             self._streamer = MJPEGStreamer(port=int(stream_port))
+            self._source._streamer = self._streamer
         else:
             self._streamer = None
 
@@ -210,12 +211,45 @@ class EdgeProcessor:
         if self._face_engine:
             self._face_engine.start()
 
+        import threading
+        self._poller_thread = threading.Thread(target=self._poll_config_loop, daemon=True)
+        self._poller_thread.start()
+
         try:
             self._loop()
         except KeyboardInterrupt:
             logger.info("KeyboardInterrupt — shutting down.")
         finally:
             self._shutdown()
+
+    def _poll_config_loop(self):
+        """Poll the backend for zone and tripwire updates every 5 seconds."""
+        import requests
+        backend_url = self._config.get("face_recognition", {}).get("backend_url", "http://127.0.0.1:8001")
+        api_url = f"{backend_url}/api/cameras/{self._source.name}"
+        
+        while self._running:
+            try:
+                resp = requests.get(api_url, timeout=2.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    
+                    if data.get("status") == "OFFLINE":
+                        logger.info("Command Center marked camera as OFFLINE. Stopping Edge Node...")
+                        self.stop()
+                        break
+                        
+                    if "zones" in data:
+                        self._event_engine.update_zones(data["zones"])
+                    if "virtual_tripwires" in data:
+                        self._event_engine.update_lines(data["virtual_tripwires"])
+            except Exception as e:
+                logger.debug("Failed to poll camera config updates: %s", e)
+            
+            for _ in range(50):
+                if not self._running:
+                    break
+                time.sleep(0.1)
 
     def stop(self) -> None:
         """Signal the inference loop to stop after the current frame."""
@@ -505,9 +539,9 @@ class EdgeProcessor:
 
             # --- Display / Streaming ---
             if self._streamer:
-                stream_frame = annotated.copy() if self._display else annotated
-                self._draw_hud(stream_frame, m.fps_rolling, m.num_detections, m.dropped_frames)
-                self._streamer.update_frame(stream_frame)
+                # The MJPEG Streamer is now fed directly by VideoSource in the background thread
+                # to ensure smooth, raw video feed without AI processing lag.
+                pass
 
             if self._display:
                 self._show(annotated, m)

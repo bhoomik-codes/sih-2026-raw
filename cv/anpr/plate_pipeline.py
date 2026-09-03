@@ -144,14 +144,21 @@ class PlateOCR:
             except Exception as exc:
                 logger.warning("EasyOCR extraction error: %s", exc)
 
-        # Fallback in mock mode or when OCR returns nothing
-        mock_plate = f"MOCK-{fallback_id}" if fallback_id is not None else "UNKNOWN"
-        return PlateOCRResult(
-            plate_text=mock_plate,
-            confidence=0.85 if self._is_mock else 0.0,
-            is_mock=True,
-            raw_text=mock_plate,
-        )
+        if self._is_mock:
+            mock_plate = f"MOCK-{fallback_id}" if fallback_id is not None else "UNKNOWN"
+            return PlateOCRResult(
+                plate_text=mock_plate,
+                confidence=0.85,
+                is_mock=True,
+                raw_text=mock_plate,
+            )
+        else:
+            return PlateOCRResult(
+                plate_text="",
+                confidence=0.0,
+                is_mock=False,
+                raw_text="",
+            )
 
     @staticmethod
     def normalize_plate_text(raw_text: str) -> str:

@@ -1,15 +1,15 @@
 /**
- * IBVAP — Alert Toast System
- * Slide-in real-time alert notifications for WebSocket-delivered incidents/events.
- * Usage:
- *   import { useToastStore, ToastContainer } from '../common/AlertToast';
- *   // Push a toast: useToastStore.getState().push(incident)
- *   // In App.tsx root: <ToastContainer />
+ * IBVAP — Alert Toast System (Revamped)
+ * - Bottom-right position (away from nav interactions)
+ * - Max 3 visible toasts at once
+ * - 10-second dedup cooldown per camera+severity combo
+ * - Slim glass-style pill cards with animated progress bar
+ * - Slide-in-up animation (not right, less disruptive)
  */
 
 import React, { useEffect, useCallback, useRef } from 'react';
 import { create } from 'zustand';
-import { X, AlertTriangle, Shield, Radio, Bell } from 'lucide-react';
+import { X, AlertTriangle, Shield, Bell, BellOff } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -23,9 +23,13 @@ export interface ToastItem {
   riskScore?: number;
   cameraId?: string;
   timestamp: number;
-  /** ms before auto-dismiss — defaults to 8000 */
+  /** ms before auto-dismiss */
   duration?: number;
 }
+
+// ── Dedup map (camera+severity → last toast timestamp) ────────────────────────
+const dedupMap = new Map<string, number>();
+const DEDUP_COOLDOWN_MS = 10_000;
 
 // ── Store ──────────────────────────────────────────────────────────────────────
 
@@ -38,48 +42,59 @@ interface ToastStore {
   toggleSound: () => void;
 }
 
+const SEVERITY_DURATION: Record<string, number> = {
+  CRITICAL: 10000,
+  HIGH: 7000,
+  MEDIUM: 5000,
+  LOW: 5000,
+};
+
 export const useToastStore = create<ToastStore>((set, get) => ({
   toasts: [],
   soundEnabled: true,
 
   push(item) {
+    const sev = item.severity?.toUpperCase() ?? 'LOW';
+    const dedupKey = `${item.cameraId ?? 'unknown'}::${sev}`;
+    const now = Date.now();
+
+    // Dedup: skip if same camera+severity was toasted within cooldown window
+    const lastToasted = dedupMap.get(dedupKey);
+    if (lastToasted && now - lastToasted < DEDUP_COOLDOWN_MS) return;
+    dedupMap.set(dedupKey, now);
+
     const toast: ToastItem = {
       ...item,
-      id: `toast_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      timestamp: Date.now(),
-      duration: item.duration ?? (
-        item.severity?.toUpperCase() === 'CRITICAL' ? 12000 : 8000
-      ),
+      id: `toast_${now}_${Math.random().toString(36).slice(2, 5)}`,
+      timestamp: now,
+      duration: item.duration ?? SEVERITY_DURATION[sev] ?? 6000,
     };
 
-    // Cap at 5 visible toasts — remove the oldest
-    set((state) => ({
-      toasts: [toast, ...state.toasts].slice(0, 5),
+    // Cap at 3 visible toasts — drop the oldest
+    set(state => ({
+      toasts: [toast, ...state.toasts].slice(0, 3),
     }));
 
-    // Play sound if enabled (CRITICAL & HIGH only)
-    const sev = item.severity?.toUpperCase();
+    // Sound: CRITICAL & HIGH only
     if (get().soundEnabled && (sev === 'CRITICAL' || sev === 'HIGH')) {
       try {
         const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const oscillator = ctx.createOscillator();
+        const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        oscillator.connect(gain);
+        osc.connect(gain);
         gain.connect(ctx.destination);
-        oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(sev === 'CRITICAL' ? 880 : 660, ctx.currentTime);
-        gain.gain.setValueAtTime(0.08, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-        oscillator.start(ctx.currentTime);
-        oscillator.stop(ctx.currentTime + 0.4);
-      } catch {
-        // Audio not available — silently ignore
-      }
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(sev === 'CRITICAL' ? 900 : 660, ctx.currentTime);
+        gain.gain.setValueAtTime(0.06, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.35);
+      } catch { /* Audio unavailable — ignore */ }
     }
   },
 
   dismiss(id) {
-    set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }));
+    set(state => ({ toasts: state.toasts.filter(t => t.id !== id) }));
   },
 
   dismissAll() {
@@ -87,14 +102,14 @@ export const useToastStore = create<ToastStore>((set, get) => ({
   },
 
   toggleSound() {
-    set((state) => ({ soundEnabled: !state.soundEnabled }));
+    set(state => ({ soundEnabled: !state.soundEnabled }));
   },
 }));
 
-// ── Hook to push from incident/event data ─────────────────────────────────────
+// ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function usePushIncidentToast() {
-  const push = useToastStore((s) => s.push);
+  const push = useToastStore(s => s.push);
   return useCallback(
     (incident: {
       severity?: string;
@@ -118,111 +133,129 @@ export function usePushIncidentToast() {
   );
 }
 
-// ── Toast Card ────────────────────────────────────────────────────────────────
+// ── Severity style tokens ──────────────────────────────────────────────────────
 
-const SEVERITY_STYLES: Record<string, { border: string; icon: string; badge: string; dot: string }> = {
+const SEV_STYLES: Record<string, { borderColor: string; iconColor: string; badgeBg: string; badgeText: string; barColor: string }> = {
   CRITICAL: {
-    border: 'border-rose-500/60',
-    icon: 'text-rose-400',
-    badge: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
-    dot: 'bg-rose-500',
+    borderColor: 'rgba(255,50,50,0.55)',
+    iconColor: '#ff5050',
+    badgeBg: 'rgba(255,50,50,0.15)',
+    badgeText: '#ff7070',
+    barColor: '#ff3232',
   },
   HIGH: {
-    border: 'border-orange-500/60',
-    icon: 'text-orange-400',
-    badge: 'bg-orange-500/20 text-orange-300 border-orange-500/40',
-    dot: 'bg-orange-500',
+    borderColor: 'rgba(255,140,0,0.55)',
+    iconColor: '#ffaa00',
+    badgeBg: 'rgba(255,140,0,0.12)',
+    badgeText: '#ffbf44',
+    barColor: '#ff9900',
   },
   MEDIUM: {
-    border: 'border-amber-400/60',
-    icon: 'text-amber-400',
-    badge: 'bg-amber-400/20 text-amber-300 border-amber-400/40',
-    dot: 'bg-amber-400',
+    borderColor: 'rgba(255,200,0,0.5)',
+    iconColor: '#ffd000',
+    badgeBg: 'rgba(255,200,0,0.1)',
+    badgeText: '#ffdf55',
+    barColor: '#ffd000',
   },
   LOW: {
-    border: 'border-cyan-400/40',
-    icon: 'text-cyan-400',
-    badge: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
-    dot: 'bg-cyan-400',
+    borderColor: 'rgba(0,212,255,0.3)',
+    iconColor: '#00d4ff',
+    badgeBg: 'rgba(0,212,255,0.08)',
+    badgeText: '#4dd9ff',
+    barColor: '#00d4ff',
   },
 };
 
-function getStyles(severity: string) {
-  return SEVERITY_STYLES[severity?.toUpperCase()] || SEVERITY_STYLES.LOW;
+function getStyles(sev: string) {
+  return SEV_STYLES[sev?.toUpperCase()] ?? SEV_STYLES.LOW;
 }
+
+// ── Toast Card ────────────────────────────────────────────────────────────────
 
 const ToastCard: React.FC<{ toast: ToastItem; onDismiss: (id: string) => void }> = ({
   toast,
   onDismiss,
 }) => {
-  const styles = getStyles(toast.severity);
+  const s = getStyles(toast.severity);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isCritical = toast.severity?.toUpperCase() === 'CRITICAL';
 
   useEffect(() => {
     timerRef.current = setTimeout(() => onDismiss(toast.id), toast.duration);
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [toast.id, toast.duration, onDismiss]);
 
-  const isCritical = toast.severity?.toUpperCase() === 'CRITICAL';
-
   return (
     <div
-      className={`
-        relative w-80 bg-[#0f1621] border ${styles.border}
-        rounded-lg shadow-2xl overflow-hidden
-        animate-slide-in-right
-        ${isCritical ? 'shadow-rose-500/10' : ''}
-      `}
+      className="relative overflow-hidden animate-slide-in-up"
+      style={{
+        width: '280px',
+        background: 'rgba(4,12,28,0.92)',
+        backdropFilter: 'blur(14px)',
+        border: `1px solid ${s.borderColor}`,
+        borderRadius: '4px',
+        boxShadow: `0 4px 20px rgba(0,0,0,0.6), 0 0 12px ${s.borderColor}`,
+      }}
       role="alert"
     >
-      {/* Progress bar */}
+      {/* Progress bar at bottom */}
       <div
-        className={`absolute bottom-0 left-0 h-0.5 ${styles.dot}`}
+        className="absolute bottom-0 left-0 h-[2px]"
         style={{
+          background: s.barColor,
+          boxShadow: `0 0 6px ${s.barColor}`,
           animation: `shrink-width ${toast.duration}ms linear forwards`,
         }}
       />
 
-      <div className="p-3.5">
-        {/* Top row */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center space-x-2">
-            <div className={`mt-0.5 ${isCritical ? 'animate-pulse' : ''}`}>
-              {isCritical
-                ? <AlertTriangle className={`w-4 h-4 ${styles.icon}`} />
-                : <Shield className={`w-4 h-4 ${styles.icon}`} />
-              }
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center space-x-1.5 mb-0.5">
-                <span className={`px-1 py-0.5 rounded text-[9px] font-mono font-bold uppercase border ${styles.badge}`}>
-                  {toast.severity?.toUpperCase()}
-                </span>
-                {toast.riskScore !== undefined && (
-                  <span className="text-[10px] font-mono text-[#8f9195]">
-                    RISK: <span className={`font-bold ${styles.icon}`}>{toast.riskScore}</span>
-                  </span>
-                )}
-              </div>
-              <div className="text-xs font-semibold text-[#dce2f3] truncate leading-tight">
-                {toast.title}
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={() => onDismiss(toast.id)}
-            className="flex-shrink-0 p-0.5 rounded text-[#8f9195] hover:text-[#dce2f3] hover:bg-[#232a36] transition"
-          >
-            <X className="w-3 h-3" />
-          </button>
+      <div className="p-3 flex items-start gap-2">
+        {/* Icon */}
+        <div className={`flex-shrink-0 mt-0.5 ${isCritical ? 'animate-pulse' : ''}`}>
+          {isCritical
+            ? <AlertTriangle style={{ width: 14, height: 14, color: s.iconColor }} />
+            : <Shield style={{ width: 14, height: 14, color: s.iconColor }} />
+          }
         </div>
 
-        {/* Subtitle */}
-        {toast.subtitle && (
-          <div className="mt-1.5 ml-6 text-[10px] text-[#8f9195] font-mono truncate">
-            {toast.subtitle}
+        <div className="flex-1 min-w-0">
+          {/* Top row: severity badge + risk */}
+          <div className="flex items-center gap-1.5 mb-1">
+            <span
+              className="px-1 py-0.5 rounded-sm font-mono text-[9px] font-bold uppercase"
+              style={{ background: s.badgeBg, color: s.badgeText, border: `1px solid ${s.borderColor}` }}
+            >
+              {toast.severity?.toUpperCase()}
+            </span>
+            {toast.riskScore !== undefined && (
+              <span className="font-mono text-[9px]" style={{ color: 'rgba(0,212,255,0.5)' }}>
+                RISK: <span style={{ color: s.iconColor, fontWeight: 700 }}>{toast.riskScore}</span>
+              </span>
+            )}
           </div>
-        )}
+
+          {/* Title */}
+          <div className="font-semibold text-[11px] truncate" style={{ color: '#c8d6f0' }}>
+            {toast.title}
+          </div>
+
+          {/* Subtitle */}
+          {toast.subtitle && (
+            <div className="font-mono text-[9px] truncate mt-0.5" style={{ color: 'rgba(0,212,255,0.45)' }}>
+              {toast.subtitle}
+            </div>
+          )}
+        </div>
+
+        {/* Dismiss */}
+        <button
+          onClick={() => onDismiss(toast.id)}
+          className="flex-shrink-0 p-0.5 rounded transition-colors"
+          style={{ color: 'rgba(0,212,255,0.35)' }}
+          onMouseEnter={e => (e.currentTarget.style.color = '#00d4ff')}
+          onMouseLeave={e => (e.currentTarget.style.color = 'rgba(0,212,255,0.35)')}
+        >
+          <X style={{ width: 11, height: 11 }} />
+        </button>
       </div>
     </div>
   );
@@ -231,41 +264,54 @@ const ToastCard: React.FC<{ toast: ToastItem; onDismiss: (id: string) => void }>
 // ── Container ─────────────────────────────────────────────────────────────────
 
 export const ToastContainer: React.FC = () => {
-  const toasts = useToastStore((s) => s.toasts);
-  const soundEnabled = useToastStore((s) => s.soundEnabled);
-  const dismiss = useToastStore((s) => s.dismiss);
-  const dismissAll = useToastStore((s) => s.dismissAll);
-  const toggleSound = useToastStore((s) => s.toggleSound);
+  const toasts = useToastStore(s => s.toasts);
+  const soundEnabled = useToastStore(s => s.soundEnabled);
+  const dismiss = useToastStore(s => s.dismiss);
+  const dismissAll = useToastStore(s => s.dismissAll);
+  const toggleSound = useToastStore(s => s.toggleSound);
 
   if (toasts.length === 0) return null;
 
   return (
     <div
-      className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 items-end"
+      className="fixed bottom-4 right-4 z-[9999] flex flex-col-reverse gap-2 items-end"
       aria-live="polite"
       aria-label="Alert notifications"
     >
-      {/* Controls */}
-      <div className="flex items-center space-x-2 mb-1">
+      {/* Controls row */}
+      <div className="flex items-center gap-2 mt-1">
         <button
           onClick={toggleSound}
           title={soundEnabled ? 'Mute alerts' : 'Enable alert sounds'}
-          className="p-1 rounded bg-[#0f1621] border border-[#232a36] text-[#8f9195] hover:text-[#dce2f3] hover:border-[#374151] transition"
+          className="p-1 rounded transition-all"
+          style={{
+            background: 'rgba(4,12,28,0.85)',
+            border: '1px solid rgba(0,212,255,0.15)',
+            color: soundEnabled ? '#ffb800' : 'rgba(0,212,255,0.35)',
+          }}
         >
-          <Bell className={`w-3 h-3 ${soundEnabled ? 'text-amber-400' : ''}`} />
+          {soundEnabled
+            ? <Bell style={{ width: 11, height: 11 }} />
+            : <BellOff style={{ width: 11, height: 11 }} />
+          }
         </button>
         {toasts.length > 1 && (
           <button
             onClick={dismissAll}
-            className="text-[10px] font-mono text-[#8f9195] hover:text-[#dce2f3] transition px-1.5 py-1 rounded bg-[#0f1621] border border-[#232a36]"
+            className="font-mono text-[9px] px-2 py-1 rounded transition-all uppercase tracking-wider"
+            style={{
+              background: 'rgba(4,12,28,0.85)',
+              border: '1px solid rgba(0,212,255,0.15)',
+              color: 'rgba(0,212,255,0.5)',
+            }}
           >
             CLEAR ALL ({toasts.length})
           </button>
         )}
       </div>
 
-      {/* Toasts */}
-      {toasts.map((toast) => (
+      {/* Toast cards (rendered bottom-to-top via flex-col-reverse) */}
+      {toasts.map(toast => (
         <ToastCard key={toast.id} toast={toast} onDismiss={dismiss} />
       ))}
     </div>

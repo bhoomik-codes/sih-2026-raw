@@ -65,6 +65,11 @@ def main() -> None:
         help="Override camera source URI (RTSP URL or local video path).",
     )
     parser.add_argument(
+        "--camera-id",
+        default=None,
+        help="Override camera ID (used for backend communication).",
+    )
+    parser.add_argument(
         "--no-display",
         action="store_true",
         help="Run headless — disable OpenCV display window.",
@@ -92,6 +97,7 @@ def main() -> None:
 
     # Apply CLI overrides
     if args.source:
+        args.source = args.source.strip('\'"\\')
         config.setdefault("camera", {})["source"] = args.source
         logger.info("Source overridden from CLI: %s", args.source)
 
@@ -109,7 +115,7 @@ def main() -> None:
     source_uri = cam_cfg.get("source", 0)
     max_queue_size = int(cam_cfg.get("max_queue_size", 2))
     reconnect_delay = float(cam_cfg.get("reconnect_delay_s", 3.0))
-    camera_name = cam_cfg.get("name", "CAM-01")
+    camera_name = args.camera_id if args.camera_id else cam_cfg.get("name", "CAM-01")
 
     # Resolve detector config
     det_cfg = config.get("detector", {})

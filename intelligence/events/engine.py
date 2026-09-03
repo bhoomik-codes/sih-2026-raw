@@ -107,6 +107,14 @@ class EventEngine:
         self._loitering.cleanup_stale_tracks(active_track_ids)
         self._night.cleanup_stale_tracks(active_track_ids)
 
+    def update_zones(self, zones_config: List[dict]) -> None:
+        """Dynamically update polygon zones at runtime."""
+        self._fence.update_zones(zones_config)
+
+    def update_lines(self, lines_config: List[dict]) -> None:
+        """Dynamically update tripwires at runtime."""
+        self._crossing.update_lines(lines_config)
+
     def draw(self, frame: np.ndarray) -> None:
         """
         Draw all zones, lines, and overlays on the frame in-place.

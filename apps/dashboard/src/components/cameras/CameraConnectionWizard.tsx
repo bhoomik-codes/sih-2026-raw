@@ -221,8 +221,27 @@ export const CameraConnectionWizard: React.FC<WizardProps> = ({ onClose, onSubmi
 
               {sourceType === 'file' && (
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">File Path</label>
-                  <input type="text" value={fileConfig.path} onChange={e => setFileConfig({path: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white" />
+                  <label className="block text-xs font-medium text-slate-400 mb-1">File Path (Absolute Path or Relative to Backend)</label>
+                  <div className="flex gap-2">
+                    <input type="text" value={fileConfig.path} onChange={e => setFileConfig({path: e.target.value})} className="flex-1 bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white" />
+                    <button 
+                      onClick={async () => {
+                        try {
+                          // The Vite proxy handles routing /api to the backend
+                          const res = await fetch('/api/utils/select-file');
+                          if (res.ok) {
+                            const data = await res.json();
+                            setFileConfig({path: data.path});
+                          }
+                        } catch (e) {
+                          console.error("Failed to open file selector", e);
+                        }
+                      }}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium rounded border border-slate-600 transition"
+                    >
+                      Browse...
+                    </button>
+                  </div>
                   <p className="text-xs text-slate-500 mt-2">Example: data/videos/test_video.mp4</p>
                 </div>
               )}

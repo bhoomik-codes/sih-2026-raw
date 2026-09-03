@@ -78,15 +78,20 @@ class VideoSource:
         read_timeout_s: float = 5.0,
         name: str = "CAM-01",
     ) -> None:
-        self._uri = source_uri
+        # OpenCV requires device indexes to be integers, not string digits
+        if isinstance(source_uri, str) and source_uri.isdigit():
+            self._uri = int(source_uri)
+        else:
+            self._uri = source_uri
+            
         self._max_queue_size = max(1, max_queue_size)
         self._reconnect_delay_s = reconnect_delay_s
         self._read_timeout_s = read_timeout_s
         self._name = name
-        self._is_network_source = isinstance(source_uri, str) and (
-            source_uri.startswith("rtsp://")
-            or source_uri.startswith("http://")
-            or source_uri.startswith("https://")
+        self._is_network_source = isinstance(self._uri, str) and (
+            self._uri.startswith("rtsp://")
+            or self._uri.startswith("http://")
+            or self._uri.startswith("https://")
         )
 
         self._queue: queue.Queue[Frame] = queue.Queue(maxsize=self._max_queue_size)
@@ -265,6 +270,10 @@ class VideoSource:
                 frame_id=self._frames_read,
             )
             self._enqueue(frame)
+
+            # Update the dashboard stream directly with raw video frame (no AI processing lag)
+            if getattr(self, "_streamer", None):
+                self._streamer.update_frame(data)
 
     def _enqueue(self, frame: Frame) -> None:
         """

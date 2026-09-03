@@ -131,14 +131,18 @@ class LineCrossingEngine:
     def __init__(self, lines_config: List[dict], camera_name: str) -> None:
         self._camera_name = camera_name
         self._lines: List[_CrossingLine] = []
+        self.update_lines(lines_config)
 
+    def update_lines(self, lines_config: List[dict]) -> None:
+        new_lines = []
         for lc in lines_config:
             start = tuple(lc["start"])
             end = tuple(lc["end"])
             classes = set(lc["classes"]) if lc.get("classes") else None
             direction = lc.get("direction", "any")
             severity = EventSeverity[lc.get("severity", "critical").upper()]
-            self._lines.append(_CrossingLine(lc["name"], start, end, classes, direction, severity))
+            new_lines.append(_CrossingLine(lc["name"], start, end, classes, direction, severity))
+        self._lines = new_lines
 
     def update(self, detections: List[Detection]) -> List[SurveillanceEvent]:
         """Check all detections against all lines. Returns any crossing events."""
