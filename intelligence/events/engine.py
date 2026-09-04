@@ -111,7 +111,11 @@ class EventEngine:
 
     def update_zones(self, zones_config: List[dict]) -> None:
         """Dynamically update polygon zones at runtime."""
-        self._fence.update_zones(zones_config)
+        restricted = [z for z in zones_config if str(z.get("type", "RESTRICTED")).upper() == "RESTRICTED"]
+        loitering = [z for z in zones_config if str(z.get("type", "")).upper() == "LOITERING"]
+        
+        self._fence.update_zones(restricted)
+        self._loitering.update_zones(loitering)
 
     def update_lines(self, lines_config: List[dict]) -> None:
         """Dynamically update tripwires at runtime."""

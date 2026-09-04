@@ -145,7 +145,8 @@ class LineCrossingEngine:
             end = tuple(lc["end"])
             classes = set(lc["classes"]) if lc.get("classes") else None
             direction = lc.get("direction", "any")
-            severity = EventSeverity[lc.get("severity", "critical").upper()]
+            severity_str = lc.get("severity") or "critical"
+            severity = EventSeverity[severity_str.upper()]
             new_lines.append(_CrossingLine(lc["name"], start, end, classes, direction, severity))
         self._lines = new_lines
 

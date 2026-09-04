@@ -308,6 +308,20 @@ async def update_camera_fence(camera_id: str, payload: FencePayload):
     return cameras[camera_id]
 
 
+@app.post("/api/cameras/{camera_id}/reconnect")
+async def reconnect_camera(camera_id: str):
+    """Trigger a reconnection of the camera feed (in-memory state only)."""
+    _ensure_default_camera()
+    if camera_id not in cameras:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    
+    # In a real system, this would trigger the edge node to restart its feed.
+    # For now, we just log and return 200 OK so the UI doesn't crash.
+    print(f"Reconnect requested for camera {camera_id}")
+    return {"success": True, "message": "Reconnection requested"}
+
+
+
 # ─── Face Registry Endpoints ──────────────────────────────────────────────────
 
 @app.get("/api/faces", response_model=List[FaceRecord])
@@ -772,17 +786,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "incident_id", incident_payload.get("id", f"INC-{uuid.uuid4().hex[:8].upper()}")
                 )
                 incident_payload.setdefault("camera_id", incident_payload.get("camera_name", node_id))
-                
-                # --- BLOCKCHAIN ANCHORING ---
-                severity = str(incident_payload.get("severity", "LOW")).upper()
-                if severity in ["HIGH", "CRITICAL"]:
-                    try:
-                        tx_hash, ev_hash = blockchain.anchor.anchor_evidence(incident_payload)
-                        incident_payload["blockchain_tx_hash"] = tx_hash
-                        incident_payload["evidence_hash"] = ev_hash
-                    except Exception as e:
-                        print(f"[Blockchain] Failed to anchor incident: {e}")
-                
+                # Broadcast immediately for real-time UI updates
                 _remember(_in_memory_incidents, incident_payload)
                 await broadcast_ws_message(
                     {
@@ -792,8 +796,20 @@ async def websocket_endpoint(websocket: WebSocket):
                     sender=websocket,
                 )
 
-                if db.db_enabled():
-                    def _save_inc_to_db():
+                # Process blockchain anchoring and DB save in a background thread
+                def _process_incident_bg():
+                    # --- BLOCKCHAIN ANCHORING ---
+                    severity = str(incident_payload.get("severity", "LOW")).upper()
+                    if severity in ["HIGH", "CRITICAL"]:
+                        try:
+                            tx_hash, ev_hash = blockchain.anchor.anchor_evidence(incident_payload)
+                            incident_payload["blockchain_tx_hash"] = tx_hash
+                            incident_payload["evidence_hash"] = ev_hash
+                        except Exception as e:
+                            print(f"[Blockchain] Failed to anchor incident: {e}")
+                            
+                    # --- DB SAVE ---
+                    if db.db_enabled():
                         try:
                             import datetime
 
@@ -840,8 +856,9 @@ async def websocket_endpoint(websocket: WebSocket):
                             ).execute()
                         except Exception as db_err:
                             print(f"[Supabase DB] save_incident error: {db_err}")
-                    
-                    asyncio.create_task(asyncio.to_thread(_save_inc_to_db))
+                
+                # Fire and forget
+                asyncio.create_task(asyncio.to_thread(_process_incident_bg))
 
             elif msg_type == "edge_metrics":
                 global _latest_metrics

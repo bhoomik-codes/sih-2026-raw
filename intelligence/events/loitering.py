@@ -126,13 +126,17 @@ class LoiteringEngine:
     def __init__(self, zones_config: List[dict], camera_name: str) -> None:
         self._camera_name = camera_name
         self._zones: List[_LoiteringZone] = []
+        self.update_zones(zones_config)
 
+    def update_zones(self, zones_config: List[dict]) -> None:
+        new_zones = []
         for z in zones_config:
             polygon = np.array(z["polygon"], dtype=np.int32)
             classes = set(z["classes"]) if z.get("classes") else None
-            severity = EventSeverity[z.get("severity", "medium").upper()]
+            severity = EventSeverity[z.get("severity", "medium").upper()] if z.get("severity") else EventSeverity.MEDIUM
             threshold_s = float(z.get("threshold_s", 10.0))
-            self._zones.append(_LoiteringZone(z["name"], polygon, threshold_s, classes, severity))
+            new_zones.append(_LoiteringZone(z["name"], polygon, threshold_s, classes, severity))
+        self._zones = new_zones
 
     def update(self, detections: List[Detection], frame_wh: tuple[int, int] = (1920, 1080)) -> List[SurveillanceEvent]:
         """Check all detections against all loitering zones."""

@@ -279,7 +279,7 @@ class EdgeProcessor:
     def _loop(self) -> None:
         """Main inference loop — runs until _running is False or source empty."""
         no_frame_streak: int = 0
-        max_no_frame_streak: int = 100  # Stop if source is consistently empty
+        max_no_frame_streak: int = 200  # 10 seconds of no frames before reconnecting
 
         while self._running:
             frame: Optional[Frame] = self._source.read(timeout=0.05)
@@ -288,10 +288,15 @@ class EdgeProcessor:
                 no_frame_streak += 1
                 if no_frame_streak >= max_no_frame_streak:
                     logger.warning(
-                        "No frame received for %d consecutive reads — stopping.",
+                        "No frame received for %d consecutive reads — forcefully reconnecting VideoSource.",
                         no_frame_streak,
                     )
-                    break
+                    # Recreate video source to unstick cap.read() hanging
+                    self._source.stop()
+                    from apps.edge.video_source import VideoSource
+                    self._source = VideoSource(self._source.name, self._source._uri)
+                    self._source.start()
+                    no_frame_streak = 0
                 continue
 
             no_frame_streak = 0

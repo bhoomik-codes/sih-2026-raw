@@ -20,8 +20,8 @@ class RiskScorer:
         cfg = config or {}
         # Default mapping of event types to risk points
         self._point_map: Dict[EventType, int] = {
-            EventType.ZONE_ENTRY: int(cfg.get("zone_entry", 30)),
-            EventType.LINE_CROSSING: int(cfg.get("line_crossing", 40)),
+            EventType.ZONE_ENTRY: int(cfg.get("zone_entry", 50)),
+            EventType.LINE_CROSSING: int(cfg.get("line_crossing", 50)),
             EventType.LOITERING: int(cfg.get("loitering", 15)),
             EventType.ZONE_EXIT: int(cfg.get("zone_exit", 0)),
             EventType.WRONG_DIRECTION: int(cfg.get("wrong_direction", 20)),

@@ -124,7 +124,8 @@ class VirtualFenceEngine:
         for z in zones_config:
             polygon = np.array(z["polygon"], dtype=np.int32)
             classes = set(z["classes"]) if z.get("classes") else None
-            severity = EventSeverity[z.get("severity", "high").upper()]
+            severity_str = z.get("severity") or "high"
+            severity = EventSeverity[severity_str.upper()]
             new_zones.append(_Zone(z["name"], polygon, classes, severity))
         self._zones = new_zones
 
