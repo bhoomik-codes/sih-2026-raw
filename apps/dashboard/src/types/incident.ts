@@ -48,4 +48,6 @@ export interface Incident {
   description?: string;
   status?: IncidentStatus;
   acknowledged_at?: string | number | null;
+  blockchain_tx_hash?: string;
+  evidence_hash?: string;
 }

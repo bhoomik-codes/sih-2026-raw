@@ -115,24 +115,18 @@ npm run dev -- --host
 ```
 *Take note of Laptop 2's IPv4 address on the LAN (e.g., `192.168.1.100`).*
 
-### Step 4: Run the Edge AI Inference Node (Laptop 1)
-Modify your edge configuration (e.g., `configs/phase8_default.yaml`) so that `backend_ws_url` points to Laptop 2:
-```yaml
-transmitter:
-  backend_ws_url: "ws://192.168.1.100:8000/ws"
-```
-Run the Edge process with live MJPEG streaming enabled:
+### Step 3: Run the System (All-In-One Launcher)
+To start both the Command Center Backend and Dashboard simultaneously, run the unified launcher:
+
 ```bash
-# If using a sample video instead of RTSP
-python scripts/get_test_video.py
-
-python -m apps.edge.multi_main \
-  --config configs/phase8_default.yaml \
-  --source data/videos/test_video.mp4 \
-  --stream-port 8081
+.\1_Run_All_In_One.bat
 ```
 
-The AI Node will now process frames locally on the GPU and beam all intelligence to the Command Center!
+This will automatically:
+1. Start the FastAPI Backend on `http://localhost:8001`
+2. Start the React Dashboard on `http://localhost:5173`
+
+*Once the Dashboard opens in your browser, you can dynamically add, start, and manage Edge Cameras directly from the "Camera Management" UI! The backend will autonomously spawn and manage the edge AI processes.*
 
 ---
 

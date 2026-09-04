@@ -78,5 +78,5 @@ tracker:
   track_buffer: 30
   type: bytetrack
 transmitter:
-  backend_ws_url: ws://localhost:8001/ws
+  backend_ws_url: ws://127.0.0.1:8001/ws
   enabled: true

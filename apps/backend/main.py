@@ -24,7 +24,12 @@ except ImportError:
 try:
     from apps.backend import face_utils
 except ImportError:
-    import face_utils  # type: ignore
+    import face_utils
+
+try:
+    from apps.backend import blockchain
+except ImportError:
+    import blockchain
 
 
 # Load Config
@@ -206,7 +211,7 @@ async def get_camera_stream(camera_id: str):
     cam = cameras.get(camera_id)
     if not cam:
         raise HTTPException(status_code=404, detail="Camera not found")
-    stream_url = cam.stream_url or "http://localhost:8081/stream"
+    stream_url = cam.stream_url or "http://127.0.0.1:8081/stream"
     return RedirectResponse(url=stream_url)
 
 
@@ -438,7 +443,7 @@ async def start_camera(camera_id: str):
         proc = subprocess.Popen(cmd)
         processes[camera_id] = proc
         cam.status = "ONLINE"
-        cam.stream_url = f"http://localhost:{assigned_port}/stream"
+        cam.stream_url = f"http://127.0.0.1:{assigned_port}/stream"
     except Exception as e:
         cam.status = "ERROR"
         cam.stream_url = None
@@ -680,7 +685,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         source_url=data.get("source_url", "data/videos/border_crossing_test.mp4"),
                         source_type=data.get("source_type", "file"),
                         status=data.get("status", "ONLINE"),
-                        stream_url=advertised_stream or "http://localhost:8081/stream",
+                        stream_url=advertised_stream or "http://127.0.0.1:8081/stream",
                         inference_enabled=True,
                     )
                 else:
@@ -759,6 +764,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     "incident_id", incident_payload.get("id", f"INC-{uuid.uuid4().hex[:8].upper()}")
                 )
                 incident_payload.setdefault("camera_id", incident_payload.get("camera_name", node_id))
+                
+                # --- BLOCKCHAIN ANCHORING ---
+                severity = str(incident_payload.get("severity", "LOW")).upper()
+                if severity in ["HIGH", "CRITICAL"]:
+                    try:
+                        tx_hash, ev_hash = blockchain.anchor.anchor_evidence(incident_payload)
+                        incident_payload["blockchain_tx_hash"] = tx_hash
+                        incident_payload["evidence_hash"] = ev_hash
+                    except Exception as e:
+                        print(f"[Blockchain] Failed to anchor incident: {e}")
+                
                 _remember(_in_memory_incidents, incident_payload)
                 await broadcast_ws_message(
                     {
@@ -793,6 +809,10 @@ async def websocket_endpoint(websocket: WebSocket):
                         except Exception:
                             pass
 
+                        desc = data.get("summary", "")
+                        if incident_payload.get("blockchain_tx_hash"):
+                            desc += f"\n\n[Blockchain Anchor] Verified TxHash: {incident_payload['blockchain_tx_hash']}"
+
                         db.get_db().table("incidents").insert(
                             {
                                 "id": f"inc_{uuid.uuid4().hex[:16]}",
@@ -803,7 +823,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "severity": data.get("severity", "MEDIUM").upper(),
                                 "risk_score": float(data.get("risk_score", 0.0)),
                                 "title": data.get("summary", "Border Security Alert"),
-                                "description": data.get("summary", ""),
+                                "description": desc,
                                 "status": "OPEN",
                                 "camera_id": cam_name,
                                 "created_at": iso_ts,

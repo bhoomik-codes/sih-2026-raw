@@ -160,7 +160,17 @@ export const IncidentCenterPage: React.FC<IncidentCenterPageProps> = ({
                     <td className="p-3 text-blue-400">#{inc.track_id}</td>
                     <td className="p-3 text-slate-200">{inc.camera_name || inc.camera_id || '—'}</td>
                     <td className="p-3 text-slate-300 truncate max-w-sm">
-                      {inc.description || `${inc.triggering_events?.length || 0} event(s)`}
+                      <div className="flex flex-col gap-1">
+                        <span>{inc.description || `${inc.triggering_events?.length || 0} event(s)`}</span>
+                        {inc.blockchain_tx_hash && (
+                          <div
+                            className="inline-flex items-center gap-1 text-[9px] font-bold tracking-wider text-emerald-400 bg-emerald-950/40 border border-emerald-900/50 px-1.5 py-0.5 rounded-full w-max"
+                            title={`Evidence Hash: ${inc.evidence_hash}\nTxHash: ${inc.blockchain_tx_hash}`}
+                          >
+                            🛡️ BLOCKCHAIN VERIFIED
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="p-3 text-right uppercase text-[10px] font-semibold">
                       <span
