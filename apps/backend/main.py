@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -206,12 +206,16 @@ async def get_camera(camera_id: str):
 
 
 @app.get("/api/streams/{camera_id}")
-async def get_camera_stream(camera_id: str):
+async def get_camera_stream(camera_id: str, request: Request):
     """Proxy or redirect stream endpoint for the given camera."""
     cam = cameras.get(camera_id)
     if not cam:
         raise HTTPException(status_code=404, detail="Camera not found")
+    
     stream_url = cam.stream_url or "http://127.0.0.1:8081/stream"
+    host = request.headers.get("host", "127.0.0.1:8000").split(":")[0]
+    stream_url = stream_url.replace("127.0.0.1", host).replace("localhost", host)
+    
     return RedirectResponse(url=stream_url)
 
 
@@ -526,7 +530,7 @@ async def get_incidents():
             res = (
                 db.get_db()
                 .table("incidents")
-                .select("*, incident_events(event_id, contribution_score, is_primary, events(*))")
+                .select("*")
                 .order("created_at", desc=True)
                 .execute()
             )

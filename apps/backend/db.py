@@ -183,7 +183,7 @@ class _SQLDatabaseClient:
         url = db_url
         if url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+pg8000://", 1)
-        self._engine = sa.create_engine(url, pool_pre_ping=True)
+        self._engine = sa.create_engine(url, pool_pre_ping=True, pool_recycle=300)
 
     def table(self, table_name: str) -> _SQLTableQuery:
         return _SQLTableQuery(self._engine, table_name)
