@@ -471,7 +471,7 @@ async def stop_camera(camera_id: str):
 
 
 @app.get("/api/health")
-async def get_health():
+def get_health():
     db_status = "offline"
     if db.db_enabled():
         try:
@@ -720,46 +720,50 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 # Persist to database if available
                 if db.db_enabled():
-                    try:
-                        import datetime
-
-                        cam_name = data.get("camera_name", node_id)
-                        ts_val = data.get("timestamp", time.time())
-                        iso_ts = datetime.datetime.fromtimestamp(
-                            ts_val, tz=datetime.timezone.utc
-                        ).isoformat()
-
-                        # Ensure camera exists to satisfy foreign key constraints
+                    def _save_evt_to_db():
                         try:
-                            db.get_db().table("cameras").upsert(
+                            import datetime
+
+                            cam_name = data.get("camera_name", node_id)
+                            ts_val = data.get("timestamp", time.time())
+                            iso_ts = datetime.datetime.fromtimestamp(
+                                ts_val, tz=datetime.timezone.utc
+                            ).isoformat()
+
+                            # Ensure camera exists to satisfy foreign key constraints
+                            try:
+                                db.get_db().table("cameras").upsert(
+                                    {
+                                        "id": cam_name,
+                                        "camera_code": cam_name,
+                                        "name": cam_name,
+                                        "status": "ONLINE",
+                                        "source_type": "file",
+                                        "source_url": "data/videos/border_patrol.mp4",
+                                    }
+                                ).execute()
+                            except Exception:
+                                pass
+
+                            db.get_db().table("events").insert(
                                 {
-                                    "id": cam_name,
-                                    "camera_code": cam_name,
-                                    "name": cam_name,
-                                    "status": "ONLINE",
-                                    "source_type": "file",
-                                    "source_url": "data/videos/border_patrol.mp4",
+                                    "id": f"evt_{uuid.uuid4().hex[:16]}",
+                                    "event_code": f"EVT-{uuid.uuid4().hex[:8].upper()}",
+                                    "event_type": data.get("event_type", "SURVEILLANCE_EVENT"),
+                                    "severity": data.get("severity", "LOW").upper(),
+                                    "track_id": str(data.get("track_id", 0)),
+                                    "camera_id": cam_name,
+                                    "capture_ts": iso_ts,
+                                    "event_ts": iso_ts,
+                                    "confidence": float(data.get("confidence", 1.0)),
+                                    "metadata": data.get("details", {}),
                                 }
                             ).execute()
-                        except Exception:
-                            pass
-
-                        db.get_db().table("events").insert(
-                            {
-                                "id": f"evt_{uuid.uuid4().hex[:16]}",
-                                "event_code": f"EVT-{uuid.uuid4().hex[:8].upper()}",
-                                "event_type": data.get("event_type", "SURVEILLANCE_EVENT"),
-                                "severity": data.get("severity", "LOW").upper(),
-                                "track_id": str(data.get("track_id", 0)),
-                                "camera_id": cam_name,
-                                "capture_ts": iso_ts,
-                                "event_ts": iso_ts,
-                                "confidence": float(data.get("confidence", 1.0)),
-                                "metadata": data.get("details", {}),
-                            }
-                        ).execute()
-                    except Exception as db_err:
-                        print(f"[Supabase DB] save_event error: {db_err}")
+                        except Exception as db_err:
+                            print(f"[Supabase DB] save_event error: {db_err}")
+                    
+                    # Fire and forget in a background thread to prevent blocking the event loop
+                    asyncio.create_task(asyncio.to_thread(_save_evt_to_db))
 
             elif msg_type == "edge_incident":
                 incident_payload = dict(data)
@@ -789,52 +793,55 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
 
                 if db.db_enabled():
-                    try:
-                        import datetime
-
-                        cam_name = data.get("camera_name", node_id)
-                        ts_val = data.get("timestamp", time.time())
-                        iso_ts = datetime.datetime.fromtimestamp(
-                            ts_val, tz=datetime.timezone.utc
-                        ).isoformat()
-
-                        # Ensure camera exists to satisfy foreign key constraints
+                    def _save_inc_to_db():
                         try:
-                            db.get_db().table("cameras").upsert(
+                            import datetime
+
+                            cam_name = data.get("camera_name", node_id)
+                            ts_val = data.get("timestamp", time.time())
+                            iso_ts = datetime.datetime.fromtimestamp(
+                                ts_val, tz=datetime.timezone.utc
+                            ).isoformat()
+
+                            # Ensure camera exists to satisfy foreign key constraints
+                            try:
+                                db.get_db().table("cameras").upsert(
+                                    {
+                                        "id": cam_name,
+                                        "camera_code": cam_name,
+                                        "name": cam_name,
+                                        "status": "ONLINE",
+                                        "source_type": "file",
+                                        "source_url": "data/videos/border_patrol.mp4",
+                                    }
+                                ).execute()
+                            except Exception:
+                                pass
+
+                            desc = data.get("summary", "")
+                            if incident_payload.get("blockchain_tx_hash"):
+                                desc += f"\n\n[Blockchain Anchor] Verified TxHash: {incident_payload['blockchain_tx_hash']}"
+
+                            db.get_db().table("incidents").insert(
                                 {
-                                    "id": cam_name,
-                                    "camera_code": cam_name,
-                                    "name": cam_name,
-                                    "status": "ONLINE",
-                                    "source_type": "file",
-                                    "source_url": "data/videos/border_patrol.mp4",
+                                    "id": f"inc_{uuid.uuid4().hex[:16]}",
+                                    "incident_code": data.get(
+                                        "incident_id", f"INC-{uuid.uuid4().hex[:8].upper()}"
+                                    ),
+                                    "incident_type": data.get("incident_type", "BORDER_SECURITY_ALERT"),
+                                    "severity": data.get("severity", "MEDIUM").upper(),
+                                    "risk_score": float(data.get("risk_score", 0.0)),
+                                    "title": data.get("summary", "Border Security Alert"),
+                                    "description": desc,
+                                    "status": "OPEN",
+                                    "camera_id": cam_name,
+                                    "created_at": iso_ts,
                                 }
                             ).execute()
-                        except Exception:
-                            pass
-
-                        desc = data.get("summary", "")
-                        if incident_payload.get("blockchain_tx_hash"):
-                            desc += f"\n\n[Blockchain Anchor] Verified TxHash: {incident_payload['blockchain_tx_hash']}"
-
-                        db.get_db().table("incidents").insert(
-                            {
-                                "id": f"inc_{uuid.uuid4().hex[:16]}",
-                                "incident_code": data.get(
-                                    "incident_id", f"INC-{uuid.uuid4().hex[:8].upper()}"
-                                ),
-                                "incident_type": data.get("incident_type", "BORDER_SECURITY_ALERT"),
-                                "severity": data.get("severity", "MEDIUM").upper(),
-                                "risk_score": float(data.get("risk_score", 0.0)),
-                                "title": data.get("summary", "Border Security Alert"),
-                                "description": desc,
-                                "status": "OPEN",
-                                "camera_id": cam_name,
-                                "created_at": iso_ts,
-                            }
-                        ).execute()
-                    except Exception as db_err:
-                        print(f"[Supabase DB] save_incident error: {db_err}")
+                        except Exception as db_err:
+                            print(f"[Supabase DB] save_incident error: {db_err}")
+                    
+                    asyncio.create_task(asyncio.to_thread(_save_inc_to_db))
 
             elif msg_type == "edge_metrics":
                 global _latest_metrics
@@ -848,46 +855,49 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
 
                 if db.db_enabled():
-                    try:
-                        import datetime
-                        ts_val = data.get("timestamp", time.time())
-                        iso_ts = datetime.datetime.fromtimestamp(
-                            ts_val, tz=datetime.timezone.utc
-                        ).isoformat()
-                        
-                        # Ensure node exists to satisfy foreign key constraints
+                    def _save_metrics_to_db():
                         try:
-                            db.get_db().table("nodes").upsert(
+                            import datetime
+                            ts_val = data.get("timestamp", time.time())
+                            iso_ts = datetime.datetime.fromtimestamp(
+                                ts_val, tz=datetime.timezone.utc
+                            ).isoformat()
+                            
+                            # Ensure node exists to satisfy foreign key constraints
+                            try:
+                                db.get_db().table("nodes").upsert(
+                                    {
+                                        "id": node_id,
+                                        "node_code": node_id,
+                                        "name": f"Edge Node {node_id}",
+                                        "node_type": "edge",
+                                        "status": "ONLINE",
+                                        "last_heartbeat_at": iso_ts
+                                    }
+                                ).execute()
+                            except Exception:
+                                pass
+                            
+                            # Insert system_metrics
+                            db.get_db().table("system_metrics").insert(
                                 {
-                                    "id": node_id,
-                                    "node_code": node_id,
-                                    "name": f"Edge Node {node_id}",
-                                    "node_type": "edge",
-                                    "status": "ONLINE",
-                                    "last_heartbeat_at": iso_ts
+                                    "id": f"met_{uuid.uuid4().hex[:16]}",
+                                    "node_id": node_id,
+                                    "timestamp": iso_ts,
+                                    "cpu_percent": float(data.get("cpu_percent", 0.0) or 0.0),
+                                    "ram_percent": float(data.get("ram_percent", 0.0) or 0.0),
+                                    "ram_used_mb": float(data.get("ram_used_mb", 0.0) or 0.0),
+                                    "gpu_utilization": float(data.get("gpu_utilization", 0.0) or 0.0),
+                                    "gpu_memory_used_mb": float(data.get("gpu_memory_used_mb", 0.0) or 0.0),
+                                    "gpu_temperature_c": float(data.get("gpu_temperature_c", 0.0) or 0.0),
+                                    "inference_fps": float(data.get("inference_fps", 0.0) or 0.0),
+                                    "active_cameras": int(data.get("active_cameras", 0) or 0),
                                 }
                             ).execute()
-                        except Exception:
-                            pass
-                        
-                        # Insert system_metrics
-                        db.get_db().table("system_metrics").insert(
-                            {
-                                "id": f"met_{uuid.uuid4().hex[:16]}",
-                                "node_id": node_id,
-                                "timestamp": iso_ts,
-                                "cpu_percent": float(data.get("cpu_percent", 0.0) or 0.0),
-                                "ram_percent": float(data.get("ram_percent", 0.0) or 0.0),
-                                "ram_used_mb": float(data.get("ram_used_mb", 0.0) or 0.0),
-                                "gpu_utilization": float(data.get("gpu_utilization", 0.0) or 0.0),
-                                "gpu_memory_used_mb": float(data.get("gpu_memory_used_mb", 0.0) or 0.0),
-                                "gpu_temperature_c": float(data.get("gpu_temperature_c", 0.0) or 0.0),
-                                "inference_fps": float(data.get("inference_fps", 0.0) or 0.0),
-                                "active_cameras": int(data.get("active_cameras", 0) or 0),
-                            }
-                        ).execute()
-                    except Exception as db_err:
-                        print(f"[Supabase DB] save_metrics error: {db_err}")
+                        except Exception as db_err:
+                            print(f"[Supabase DB] save_metrics error: {db_err}")
+                    
+                    asyncio.create_task(asyncio.to_thread(_save_metrics_to_db))
 
     except WebSocketDisconnect:
         if websocket in active_connections:
