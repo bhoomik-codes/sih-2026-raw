@@ -46,7 +46,7 @@ class _Zone:
         # Tracks currently inside this zone
         self._inside: Set[int] = set()
 
-    def check(self, det: Detection, camera_name: str) -> Optional[SurveillanceEvent]:
+    def check(self, det: Detection, camera_name: str, frame_wh: tuple[int, int]) -> Optional[SurveillanceEvent]:
         """
         Check if det's foot-point triggers an entry/exit event.
 
@@ -59,8 +59,11 @@ class _Zone:
         if self.classes is not None and det.class_name not in self.classes:
             return None
 
+        # Scale detection coordinate from actual frame to the 1080p base coordinates of the polygon
         foot = det.bbox.bottom_center
-        pt = (int(foot[0]), int(foot[1]))
+        scale_x = 1920.0 / frame_wh[0] if frame_wh[0] > 0 else 1.0
+        scale_y = 1080.0 / frame_wh[1] if frame_wh[1] > 0 else 1.0
+        pt = (int(foot[0] * scale_x), int(foot[1] * scale_y))
 
         inside = _point_in_polygon(pt, self.polygon)
         was_inside = det.track_id in self._inside
@@ -125,7 +128,7 @@ class VirtualFenceEngine:
             new_zones.append(_Zone(z["name"], polygon, classes, severity))
         self._zones = new_zones
 
-    def update(self, detections: List[Detection]) -> List[SurveillanceEvent]:
+    def update(self, detections: List[Detection], frame_wh: tuple[int, int] = (1920, 1080)) -> List[SurveillanceEvent]:
         """
         Check all detections against all zones.
 
@@ -135,7 +138,7 @@ class VirtualFenceEngine:
         events: List[SurveillanceEvent] = []
         for det in detections:
             for zone in self._zones:
-                event = zone.check(det, self._camera_name)
+                event = zone.check(det, self._camera_name, frame_wh)
                 if event:
                     events.append(event)
         return events
@@ -145,13 +148,19 @@ class VirtualFenceEngine:
         for zone in self._zones:
             zone.cleanup_stale_tracks(active_track_ids)
 
-    def draw(self, frame: "np.ndarray") -> None:
+    def draw(self, frame: "np.ndarray", frame_wh: tuple[int, int] = (1920, 1080)) -> None:
         """Draw zone polygons on the frame in-place (for visualization)."""
         import cv2
 
         for zone in self._zones:
             colour = (0, 0, 220)  # Red for restricted zones
-            cv2.polylines(frame, [zone.polygon.reshape(-1, 1, 2)], True, colour, 2)
+            
+            # Scale from 1080p base coordinates down to actual frame
+            scale_x = frame_wh[0] / 1920.0
+            scale_y = frame_wh[1] / 1080.0
+            scaled_poly = (zone.polygon * np.array([scale_x, scale_y])).astype(np.int32)
+
+            cv2.polylines(frame, [scaled_poly.reshape(-1, 1, 2)], True, colour, 2)
             # Label zone name at the centroid
             cx = int(zone.polygon[:, 0].mean())
             cy = int(zone.polygon[:, 1].mean())

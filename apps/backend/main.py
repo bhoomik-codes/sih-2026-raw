@@ -311,7 +311,7 @@ async def update_camera_fence(camera_id: str, payload: FencePayload):
 # ─── Face Registry Endpoints ──────────────────────────────────────────────────
 
 @app.get("/api/faces", response_model=List[FaceRecord])
-async def list_faces():
+def list_faces():
     """Return all face records (thumbnails included, embeddings excluded for UI performance)."""
     results = []
     for rec in _face_registry.values():
@@ -332,7 +332,7 @@ async def list_faces():
 
 
 @app.post("/api/faces", response_model=FaceRecord)
-async def create_face(payload: CreateFacePayload):
+def create_face(payload: CreateFacePayload):
     """
     Enroll a new face in the registry.
     Accepts a base64-encoded image, computes an LBPH embedding, and stores
@@ -371,7 +371,7 @@ async def create_face(payload: CreateFacePayload):
 
 
 @app.get("/api/faces/embeddings")
-async def get_face_embeddings():
+def get_face_embeddings():
     """
     Return all face records INCLUDING embeddings — used exclusively by the edge engine
     to sync its local recognition model. Not intended for the dashboard UI.
@@ -389,7 +389,7 @@ async def get_face_embeddings():
 
 
 @app.put("/api/faces/{face_id}", response_model=FaceRecord)
-async def update_face(face_id: str, payload: UpdateFacePayload):
+def update_face(face_id: str, payload: UpdateFacePayload):
     """Update name, role, or notes for an existing face record."""
     if face_id not in _face_registry:
         raise HTTPException(status_code=404, detail="Face record not found")
@@ -410,7 +410,7 @@ async def update_face(face_id: str, payload: UpdateFacePayload):
 
 
 @app.delete("/api/faces/{face_id}")
-async def delete_face(face_id: str):
+def delete_face(face_id: str):
     """Remove a face record from the registry."""
     if face_id not in _face_registry:
         raise HTTPException(status_code=404, detail="Face record not found")
@@ -524,7 +524,7 @@ async def get_metrics():
 
 
 @app.get("/api/incidents")
-async def get_incidents():
+def get_incidents():
     if db.db_enabled():
         try:
             res = (
@@ -542,7 +542,7 @@ async def get_incidents():
 
 
 @app.get("/api/incidents/{incident_id}")
-async def get_incident(incident_id: str):
+def get_incident(incident_id: str):
     for inc in _in_memory_incidents:
         if _incident_key(inc) == incident_id:
             return inc
@@ -564,7 +564,7 @@ async def get_incident(incident_id: str):
 
 
 @app.post("/api/incidents/{incident_id}/acknowledge")
-async def acknowledge_incident(incident_id: str):
+def acknowledge_incident(incident_id: str):
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     for inc in _in_memory_incidents:
         if _incident_key(inc) == incident_id:
@@ -594,7 +594,7 @@ async def acknowledge_incident(incident_id: str):
 
 
 @app.get("/api/events")
-async def get_events():
+def get_events():
     if db.db_enabled():
         try:
             res = (

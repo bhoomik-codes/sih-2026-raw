@@ -59,13 +59,17 @@ class _LoiteringZone:
         # track_id → whether loitering has already fired for this visit
         self._alerted: Set[int] = set()
 
-    def check(self, det: Detection, camera_name: str) -> Optional[SurveillanceEvent]:
+    def check(self, det: Detection, camera_name: str, frame_wh: tuple[int, int]) -> Optional[SurveillanceEvent]:
         if det.track_id is None:
             return None
         if self.classes is not None and det.class_name not in self.classes:
             return None
 
-        foot = (int(det.bbox.bottom_center[0]), int(det.bbox.bottom_center[1]))
+        # Scale detection coordinate from actual frame to the 1080p base coordinates of the zone
+        scale_x = 1920.0 / frame_wh[0] if frame_wh[0] > 0 else 1.0
+        scale_y = 1080.0 / frame_wh[1] if frame_wh[1] > 0 else 1.0
+        foot = (int(det.bbox.bottom_center[0] * scale_x), int(det.bbox.bottom_center[1] * scale_y))
+        
         tid = det.track_id
         inside = _point_in_polygon(foot, self.polygon)
 
@@ -130,12 +134,12 @@ class LoiteringEngine:
             threshold_s = float(z.get("threshold_s", 10.0))
             self._zones.append(_LoiteringZone(z["name"], polygon, threshold_s, classes, severity))
 
-    def update(self, detections: List[Detection]) -> List[SurveillanceEvent]:
+    def update(self, detections: List[Detection], frame_wh: tuple[int, int] = (1920, 1080)) -> List[SurveillanceEvent]:
         """Check all detections against all loitering zones."""
         events: List[SurveillanceEvent] = []
         for det in detections:
             for zone in self._zones:
-                event = zone.check(det, self._camera_name)
+                event = zone.check(det, self._camera_name, frame_wh)
                 if event:
                     events.append(event)
         return events
@@ -145,21 +149,28 @@ class LoiteringEngine:
         for zone in self._zones:
             zone.cleanup_stale_tracks(active_track_ids)
 
-    def draw(self, frame: "np.ndarray") -> None:
+    def draw(self, frame: "np.ndarray", frame_wh: tuple[int, int] = (1920, 1080)) -> None:
         """Draw loitering zones on the frame in-place."""
         import cv2
 
         for zone in self._zones:
-            colour = (255, 165, 0)  # Orange
-            cv2.polylines(frame, [zone.polygon.reshape(-1, 1, 2)], True, colour, 2)
-            cx = int(zone.polygon[:, 0].mean())
-            cy = int(zone.polygon[:, 1].mean())
+            colour = (0, 255, 255)  # Yellow for loitering zones
+            
+            # Scale from 1080p base coordinates down to actual frame
+            scale_x = frame_wh[0] / 1920.0
+            scale_y = frame_wh[1] / 1080.0
+            scaled_poly = (zone.polygon * np.array([scale_x, scale_y])).astype(np.int32)
+
+            cv2.polylines(frame, [scaled_poly.reshape(-1, 1, 2)], True, colour, 2)
+            # Annotate
+            cx = int(scaled_poly[:, 0].mean())
+            cy = int(scaled_poly[:, 1].mean())
             cv2.putText(
                 frame,
-                f"{zone.name} ({zone.threshold_s}s)",
-                (cx - 30, cy),
+                f"LOITER ({int(zone.threshold_s)}s)",
+                (cx - 20, cy),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.45,
+                0.5,
                 colour,
                 1,
                 cv2.LINE_AA,

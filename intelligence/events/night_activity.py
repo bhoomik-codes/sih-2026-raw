@@ -71,12 +71,13 @@ class NightActivityEngine:
             # Same day: e.g. 0-6
             return self._night_start <= hour < self._night_end
 
-    def update(self, detections: List[Detection]) -> List[SurveillanceEvent]:
+    def update(self, detections: List[Detection], frame_wh: tuple[int, int] = (1920, 1080)) -> List[SurveillanceEvent]:
         """
         Emit a NIGHT_MOVEMENT event for each tracked detection during nighttime.
 
         Args:
             detections: Tracked detections (track_id must be set).
+            frame_wh: Tuple of (width, height) for the current frame.
 
         Returns:
             List of NIGHT_MOVEMENT SurveillanceEvents (may be empty).
@@ -104,7 +105,11 @@ class NightActivityEngine:
                 continue
 
             self._last_event_time[det.track_id] = now
-            foot = det.bbox.bottom_center
+            
+            # Scale detection coordinate from actual frame to the 1080p base coordinates
+            scale_x = 1920.0 / frame_wh[0] if frame_wh[0] > 0 else 1.0
+            scale_y = 1080.0 / frame_wh[1] if frame_wh[1] > 0 else 1.0
+            foot = (int(det.bbox.bottom_center[0] * scale_x), int(det.bbox.bottom_center[1] * scale_y))
 
             events.append(
                 SurveillanceEvent(
@@ -130,7 +135,7 @@ class NightActivityEngine:
         for tid in stale:
             del self._last_event_time[tid]
 
-    def draw(self, frame: "np.ndarray") -> None:  # noqa: F821
+    def draw(self, frame: "np.ndarray", frame_wh: tuple[int, int] = (1920, 1080)) -> None:  # noqa: F821
         """
         Draw a night-mode indicator on the frame if currently nighttime.
         Does nothing during daytime.

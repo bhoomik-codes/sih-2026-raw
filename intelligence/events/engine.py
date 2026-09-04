@@ -82,18 +82,20 @@ class EventEngine:
 
         Args:
             detections: Tracked detections from ByteTracker (track_id must be set).
+            frame_wh: Tuple of (width, height) for the current frame.
 
         Returns:
             All SurveillanceEvents fired this frame (may be empty).
         """
+    def update(self, detections: List[Detection], frame_wh: tuple[int, int] = (1920, 1080)) -> List[SurveillanceEvent]:
         if not self._enabled or not detections:
             return []
 
         events: List[SurveillanceEvent] = []
-        events.extend(self._fence.update(detections))
-        events.extend(self._crossing.update(detections))
-        events.extend(self._loitering.update(detections))
-        events.extend(self._night.update(detections))
+        events.extend(self._fence.update(detections, frame_wh))
+        events.extend(self._crossing.update(detections, frame_wh))
+        events.extend(self._loitering.update(detections, frame_wh))
+        events.extend(self._night.update(detections, frame_wh))
 
         for ev in events:
             logger.info("EVENT  %s", ev)
@@ -115,7 +117,7 @@ class EventEngine:
         """Dynamically update tripwires at runtime."""
         self._crossing.update_lines(lines_config)
 
-    def draw(self, frame: np.ndarray) -> None:
+    def draw(self, frame: np.ndarray, frame_wh: tuple[int, int] = (1920, 1080)) -> None:
         """
         Draw all zones, lines, and overlays on the frame in-place.
 
@@ -123,7 +125,7 @@ class EventEngine:
         """
         if not self._enabled:
             return
-        self._fence.draw(frame)
-        self._crossing.draw(frame)
-        self._loitering.draw(frame)
-        self._night.draw(frame)
+        self._fence.draw(frame, frame_wh)
+        self._crossing.draw(frame, frame_wh)
+        self._loitering.draw(frame, frame_wh)
+        self._night.draw(frame, frame_wh)

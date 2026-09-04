@@ -67,14 +67,19 @@ class _CrossingLine:
         # Last known side per track_id: +1 (left/A) or -1 (right/B)
         self._last_side: Dict[int, float] = {}
 
-    def check(self, det: Detection, camera_name: str) -> Optional[SurveillanceEvent]:
+    def check(self, det: Detection, camera_name: str, frame_wh: tuple[int, int]) -> Optional[SurveillanceEvent]:
         if det.track_id is None:
             return None
         if self.classes is not None and det.class_name not in self.classes:
             return None
 
+        # Scale detection coordinate from actual frame to the 1080p base coordinates of the line
         foot = det.bbox.bottom_center
-        side = _cross_sign(self.start, self.end, foot)
+        scale_x = 1920.0 / frame_wh[0] if frame_wh[0] > 0 else 1.0
+        scale_y = 1080.0 / frame_wh[1] if frame_wh[1] > 0 else 1.0
+        pt = (foot[0] * scale_x, foot[1] * scale_y)
+        
+        side = _cross_sign(self.start, self.end, pt)
         tid = det.track_id
 
         prev = self._last_side.get(tid)
@@ -144,12 +149,12 @@ class LineCrossingEngine:
             new_lines.append(_CrossingLine(lc["name"], start, end, classes, direction, severity))
         self._lines = new_lines
 
-    def update(self, detections: List[Detection]) -> List[SurveillanceEvent]:
+    def update(self, detections: List[Detection], frame_wh: tuple[int, int] = (1920, 1080)) -> List[SurveillanceEvent]:
         """Check all detections against all lines. Returns any crossing events."""
         events: List[SurveillanceEvent] = []
         for det in detections:
             for line in self._lines:
-                event = line.check(det, self._camera_name)
+                event = line.check(det, self._camera_name, frame_wh)
                 if event:
                     events.append(event)
         return events
@@ -159,14 +164,20 @@ class LineCrossingEngine:
         for line in self._lines:
             line.cleanup_stale_tracks(active_track_ids)
 
-    def draw(self, frame: "np.ndarray") -> None:
-        """Draw crossing lines on the frame in-place."""
+    def draw(self, frame: "np.ndarray", frame_wh: tuple[int, int] = (1920, 1080)) -> None:
+        """Draw lines on frame with direction indicators."""
         import cv2
 
         for line in self._lines:
-            p1 = (int(line.start[0]), int(line.start[1]))
-            p2 = (int(line.end[0]), int(line.end[1]))
-            colour = (0, 255, 255)  # Yellow
+            colour = (0, 165, 255)  # Orange for tripwires
+            
+            # Scale from 1080p base coordinates down to actual frame
+            scale_x = frame_wh[0] / 1920.0
+            scale_y = frame_wh[1] / 1080.0
+            
+            p1 = (int(line.start[0] * scale_x), int(line.start[1] * scale_y))
+            p2 = (int(line.end[0] * scale_x), int(line.end[1] * scale_y))
+
             cv2.line(frame, p1, p2, colour, 3)
             # Arrow indicating direction A→B
             mid = ((p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2)

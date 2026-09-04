@@ -198,8 +198,8 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
 
   // ── Derived state ────────────────────────────────────────────────────────
   const hasDraft = activeTab === 'zones' ? !!draftPolygon : !!draftLine;
-  const canSaveZone = !!newZoneName && !isSaving;
-  const canSaveFence = !!newLineName && !isSaving;
+  const canSaveZone = !!newZoneName && !isSaving && !drawingActive;
+  const canSaveFence = !!newLineName && !isSaving && !drawingActive;
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden p-4 space-y-3">

@@ -239,10 +239,12 @@ class EdgeProcessor:
                         self.stop()
                         break
                         
-                    if "zones" in data:
+                    if data.get("zones") is not None:
                         self._event_engine.update_zones(data["zones"])
-                    if "virtual_tripwires" in data:
+                    if data.get("virtual_tripwires") is not None:
                         self._event_engine.update_lines(data["virtual_tripwires"])
+                    if data.get("lines") is not None:
+                        self._event_engine.update_lines(data["lines"])
             except Exception as e:
                 logger.debug("Failed to poll camera config updates: %s", e)
             
@@ -307,8 +309,9 @@ class EdgeProcessor:
                 # Run tracking if enabled, only on new detections
                 if self._tracker is not None:
                     self._last_detections = self._tracker.update(self._last_detections)
-                # Run event engine on tracked detections
-                self._last_events = self._event_engine.update(self._last_detections)
+                # Run event engine on tracked detections, scaling coordinates from 1080p UI base to frame dims
+                frame_wh = (frame.data.shape[1], frame.data.shape[0])
+                self._last_events = self._event_engine.update(self._last_detections, frame_wh)
 
                 # Run ANPR Engine
                 anpr_events = self._anpr_engine.update(frame.data, self._last_detections)
