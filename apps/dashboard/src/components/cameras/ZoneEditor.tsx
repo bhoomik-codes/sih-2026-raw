@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Zone, FenceLine } from '../../types/camera';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
-const NATIVE_W = 960;
-const NATIVE_H = 720;
+const NATIVE_W = 1920;
+const NATIVE_H = 1080;
 const CLOSE_THRESHOLD_PX = 16; // px to auto-close polygon when near first point
 
 // ─── Colour helpers ──────────────────────────────────────────────────────────

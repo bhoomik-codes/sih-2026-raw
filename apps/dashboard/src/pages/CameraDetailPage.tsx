@@ -107,10 +107,10 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
     try {
       const currentZones = camera.zones || [];
       const polygon: [number, number][] = draftPolygon || [
-        [0, 360],
-        [960, 360],
-        [960, 720],
-        [0, 720],
+        [0, 540],
+        [1920, 540],
+        [1920, 1080],
+        [0, 1080],
       ];
       const updatedZones: Zone[] = [
         ...currentZones,
@@ -161,8 +161,8 @@ export const CameraDetailPage: React.FC<CameraDetailPageProps> = ({
         ...currentLines,
         {
           name: newLineName,
-          start: draftLine?.start || [0, 350],
-          end: draftLine?.end || [960, 350],
+          start: draftLine?.start || [0, 540],
+          end: draftLine?.end || [1920, 540],
           direction: 'any',
           severity: newLineSeverity,
           classes: ['person'],
