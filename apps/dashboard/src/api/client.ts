@@ -32,26 +32,31 @@ export async function apiRequest<T>(
       headers,
     });
 
-    if (!res.ok) {
-      let errorData: any = null;
-      try {
-        errorData = await res.json();
-      } catch {
-        errorData = await res.text();
-      }
-      throw new ApiError(
-        errorData?.detail || errorData?.message || `HTTP ${res.status} ${res.statusText}`,
-        res.status,
-        errorData
-      );
-    }
-
-    // Handle 204 No Content
+    // Handle 204 No Content (no body to read)
     if (res.status === 204) {
       return {} as T;
     }
 
-    return await res.json();
+    // Read body exactly once as text
+    const text = await res.text();
+
+    // Try to parse as JSON
+    let data: any = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { message: text };
+    }
+
+    if (!res.ok) {
+      throw new ApiError(
+        data?.detail || data?.message || `HTTP ${res.status} ${res.statusText}`,
+        res.status,
+        data
+      );
+    }
+
+    return data as T;
   } catch (err: any) {
     if (err instanceof ApiError) {
       throw err;

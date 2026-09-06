@@ -117,13 +117,39 @@ class VirtualFenceEngine:
         self.update_zones(zones_config)
 
     def update_zones(self, zones_config: List[dict]) -> None:
+        """
+        Rebuild the zone list from config, preserving per-track inside/outside state.
+
+        The runtime config poller calls this on a fixed cadence. Rebuilding ``_Zone``
+        objects unconditionally would clear ``_inside``, so a track standing still
+        inside a zone would look like a fresh OUTSIDE->INSIDE transition and emit a
+        duplicate ZONE_ENTRY on every poll. Carrying the state across for zones whose
+        name and polygon are unchanged keeps the state machine honest.
+        """
+        # Snapshot existing state, keyed by identity (name + geometry)
+        previous = {self._zone_key(z.name, z.polygon): z._inside for z in self._zones}
+
         new_zones = []
         for z in zones_config:
             polygon = np.array(z["polygon"], dtype=np.int32)
             classes = set(z["classes"]) if z.get("classes") else None
-            severity = EventSeverity[z.get("severity", "high").upper()]
-            new_zones.append(_Zone(z["name"], polygon, classes, severity))
+            # `severity` may be present-but-null (Zone.severity is Optional in the
+            # backend schema), so `.get(key, default)` is not enough here.
+            severity = EventSeverity[(z.get("severity") or "high").upper()]
+            zone = _Zone(z["name"], polygon, classes, severity)
+            carried = previous.get(self._zone_key(zone.name, polygon))
+            if carried is not None:
+                zone._inside = carried
+            new_zones.append(zone)
         self._zones = new_zones
+
+    @staticmethod
+    def _zone_key(name: str, polygon: np.ndarray) -> tuple:
+        return (name, polygon.tobytes())
+
+    def config_signature(self) -> tuple:
+        """Stable identity of the active zone set — used to skip no-op config updates."""
+        return tuple(self._zone_key(z.name, z.polygon) for z in self._zones)
 
     def update(self, detections: List[Detection]) -> List[SurveillanceEvent]:
         """

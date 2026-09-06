@@ -123,7 +123,7 @@ To start both the Command Center Backend and Dashboard simultaneously, run the u
 ```
 
 This will automatically:
-1. Start the FastAPI Backend on `http://localhost:8001`
+1. Start the FastAPI Backend on `http://localhost:8000`
 2. Start the React Dashboard on `http://localhost:5173`
 
 *Once the Dashboard opens in your browser, you can dynamically add, start, and manage Edge Cameras directly from the "Camera Management" UI! The backend will autonomously spawn and manage the edge AI processes.*

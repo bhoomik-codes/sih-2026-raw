@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import socket
 import time
+import uuid
 from typing import List, Optional
 
 import cv2
@@ -155,6 +156,8 @@ class EdgeProcessor:
         backend_ws_url = proc.get("backend_ws_url") or config.get("transmitter", {}).get(
             "backend_ws_url", "ws://localhost:8000/ws"
         )
+        if "8001" in backend_ws_url:
+            backend_ws_url = backend_ws_url.replace("8001", "8000")
         enable_tx = proc.get(
             "enable_transmitter", config.get("transmitter", {}).get("enabled", True)
         )
@@ -224,28 +227,54 @@ class EdgeProcessor:
 
     def _poll_config_loop(self):
         """Poll the backend for zone and tripwire updates every 5 seconds."""
+        import json as _json
+
         import requests
-        backend_url = self._config.get("face_recognition", {}).get("backend_url", "http://127.0.0.1:8001")
+        backend_url = self._config.get("face_recognition", {}).get("backend_url", "http://127.0.0.1:8000")
+        if "8001" in backend_url:
+            backend_url = backend_url.replace("8001", "8000")
         api_url = f"{backend_url}/api/cameras/{self._source.name}"
-        
+
+        # Only push config into the engines when it actually changed. Re-applying an
+        # identical zone list would be a no-op for geometry but still churns state,
+        # and it floods the log.
+        last_zones_sig: Optional[str] = None
+        last_lines_sig: Optional[str] = None
+
         while self._running:
             try:
                 resp = requests.get(api_url, timeout=2.0)
                 if resp.status_code == 200:
                     data = resp.json()
-                    
+
                     if data.get("status") == "OFFLINE":
                         logger.info("Command Center marked camera as OFFLINE. Stopping Edge Node...")
                         self.stop()
                         break
-                        
-                    if "zones" in data:
-                        self._event_engine.update_zones(data["zones"])
-                    if "virtual_tripwires" in data:
-                        self._event_engine.update_lines(data["virtual_tripwires"])
+
+                    zones = data.get("zones")
+                    if zones is not None:
+                        sig = _json.dumps(zones, sort_keys=True, default=str)
+                        if sig != last_zones_sig:
+                            self._event_engine.update_zones(zones)
+                            last_zones_sig = sig
+                            logger.info("[PROCESSOR] zones applied: n=%d", len(zones))
+
+                    # The backend serialises tripwires under `lines` (Camera.lines,
+                    # written by POST /api/cameras/{id}/fence). `virtual_tripwires` is
+                    # kept as a fallback for older payloads.
+                    lines = data.get("lines")
+                    if lines is None:
+                        lines = data.get("virtual_tripwires")
+                    if lines is not None:
+                        sig = _json.dumps(lines, sort_keys=True, default=str)
+                        if sig != last_lines_sig:
+                            self._event_engine.update_lines(lines)
+                            last_lines_sig = sig
+                            logger.info("[PROCESSOR] tripwires applied: n=%d", len(lines))
             except Exception as e:
                 logger.debug("Failed to poll camera config updates: %s", e)
-            
+
             for _ in range(50):
                 if not self._running:
                     break
@@ -317,6 +346,7 @@ class EdgeProcessor:
                 # --- Face Recognition ---
                 if self._face_recognition_enabled and self._face_engine and self._face_detector:
                     current_track_ids: set[int] = set()
+                    new_face_detections = []
                     for det in self._last_detections:
                         if det.class_name != "person" or det.track_id is None:
                             continue
@@ -337,6 +367,32 @@ class EdgeProcessor:
                         )
                         if not face_dets:
                             continue
+
+                        from cv.detection.base import BBox, Detection
+                        for fd in face_dets:
+                            fx1 = max(0, int(fd.bbox.x1))
+                            fy1 = max(0, int(fd.bbox.y1))
+                            fx2 = min(person_crop.shape[1] - 1, int(fd.bbox.x2))
+                            fy2 = min(person_crop.shape[0] - 1, int(fd.bbox.y2))
+                            
+                            # Map back to full frame
+                            mapped_bbox = BBox(
+                                x1=x1 + fx1,
+                                y1=y1 + fy1,
+                                x2=x1 + fx2,
+                                y2=y1 + fy2,
+                            )
+                            # Create a standard Detection object for the face
+                            face_det = Detection(
+                                bbox=mapped_bbox,
+                                class_id=100, # arbitrary id for face
+                                class_name="face",
+                                confidence=fd.confidence,
+                                frame_id=frame.frame_id,
+                                timestamp=frame.timestamp,
+                                track_id=tid, # Share the person's track ID!
+                            )
+                            new_face_detections.append(face_det)
 
                         # Use the highest-confidence face detection, crop it
                         best_fd = max(face_dets, key=lambda fd: fd.confidence)
@@ -376,16 +432,37 @@ class EdgeProcessor:
                                 },
                             }
                             self._transmitter.emit_event(intruder_ev)
+                            intruder_inc = {
+                                "incident_id": f"INC-{uuid.uuid4().hex[:8].upper()}",
+                                "incident_type": "FACE_IDENTIFIED_INTRUDER",
+                                "severity": "CRITICAL",
+                                "risk_score": 100.0,
+                                "summary": f"Intruder Identified: {identity.name} (Track #{tid})",
+                                "description": f"Intruder {identity.name} recognized with match distance {identity.match_distance:.3f}",
+                                "camera_name": self._source.name,
+                                "camera_id": self._source.name,
+                                "track_id": tid,
+                                "rule_name": "face:intruder_match",
+                                "status": "OPEN",
+                                "timestamp": frame.timestamp,
+                                "triggering_events": [intruder_ev],
+                            }
+                            self._transmitter.emit_incident(intruder_inc)
                             logger.warning(
                                 "INTRUDER IDENTIFIED: %s (track #%d, dist=%.3f)",
                                 identity.name, tid, identity.match_distance,
                             )
+
+                    # Add Face Detections back into pipeline
+                    if new_face_detections:
+                        self._last_detections.extend(new_face_detections)
 
                     # Invalidate cache for tracks that have disappeared
                     for vanished_tid in list(self._recognized_tracks.keys()):
                         if vanished_tid not in current_track_ids:
                             self._recognized_tracks.pop(vanished_tid, None)
                             self._face_engine.invalidate_track(vanished_tid)
+                            self._alerted_intruder_tracks.discard(vanished_tid)
 
                 # --- Suppress events for recognized SOLDIER tracks ---
                 soldier_track_ids = {
@@ -439,8 +516,14 @@ class EdgeProcessor:
                             inc_dict = {
                                 "incident_id": inc.incident_id,
                                 "incident_type": str(
-                                    getattr(inc, "incident_type", "BORDER_SECURITY_ALERT")
+                                    getattr(inc, "incident_type", "SECURITY_INCIDENT")
                                 ),
+                                "rule_name": str(getattr(inc, "rule_name", "")),
+                                "line_id": str(getattr(inc, "line_id", "")),
+                                "zone_id": str(getattr(inc, "zone_id", "")),
+                                "direction": str(getattr(inc, "direction", "")),
+                                "condition_key": str(getattr(inc, "condition_key", "")),
+                                "event_count": int(getattr(inc, "event_count", 1)),
                                 "severity": str(
                                     inc.severity.name
                                     if hasattr(inc.severity, "name")
@@ -478,6 +561,9 @@ class EdgeProcessor:
                 # Cleanup stale tracks from incident engine
                 active_tids = {d.track_id for d in self._last_detections if d.track_id is not None}
                 self._incident_generator.cleanup_stale_tracks(active_tids)
+                for vanished_tid in list(self._alerted_intruder_tracks):
+                    if vanished_tid not in active_tids:
+                        self._alerted_intruder_tracks.discard(vanished_tid)
 
             t_inf_end = time.perf_counter()
             inference_latency_ms = (t_inf_end - t_inf_start) * 1000.0
@@ -521,12 +607,17 @@ class EdgeProcessor:
                             "end_to_end_latency_ms": m.end_to_end_latency_ms,
                             "num_detections": m.num_detections,
                             "dropped_frames": m.dropped_frames,
+                            "queue_depth": m.queue_depth,
                             "cpu_percent": m.cpu_percent,
                             "ram_percent": ram_pct,
                             "ram_used_mb": m.ram_used_mb,
-                            "gpu_utilization": m.gpu_utilization_pct or 0.0,
-                            "gpu_memory_used_mb": m.vram_used_mb or 0.0,
-                            "gpu_temperature_c": m.gpu_temp_celsius or 0.0,
+                            # Forwarded as-is: None means "no GPU telemetry source on this
+                            # host" (pynvml unavailable). Coercing to 0.0 would render as a
+                            # real 0% / 0MB / 0degC reading on the dashboard.
+                            "gpu_utilization": m.gpu_utilization_pct,
+                            "gpu_memory_used_mb": m.vram_used_mb,
+                            "vram_total_mb": m.vram_total_mb,
+                            "gpu_temperature_c": m.gpu_temp_celsius,
                             "active_cameras": 1,
                         }
                     )
@@ -539,9 +630,9 @@ class EdgeProcessor:
 
             # --- Display / Streaming ---
             if self._streamer:
-                # The MJPEG Streamer is now fed directly by VideoSource in the background thread
-                # to ensure smooth, raw video feed without AI processing lag.
-                pass
+                # Push the fully annotated frame (with bboxes, face boxes, zone overlays,
+                # events) to the MJPEG streamer so the dashboard shows all overlays.
+                self._streamer.update_frame(annotated)
 
             if self._display:
                 self._show(annotated, m)

@@ -134,15 +134,38 @@ class LineCrossingEngine:
         self.update_lines(lines_config)
 
     def update_lines(self, lines_config: List[dict]) -> None:
+        """
+        Rebuild the line list from config, preserving each track's last-known side.
+
+        Called by the runtime config poller, so it must be state-preserving: dropping
+        ``_last_side`` would make every track look brand new and swallow the very next
+        crossing (``prev is None`` returns no event).
+        """
+        previous = {self._line_key(l.name, l.start, l.end): l._last_side for l in self._lines}
+
         new_lines = []
         for lc in lines_config:
             start = tuple(lc["start"])
             end = tuple(lc["end"])
             classes = set(lc["classes"]) if lc.get("classes") else None
-            direction = lc.get("direction", "any")
-            severity = EventSeverity[lc.get("severity", "critical").upper()]
-            new_lines.append(_CrossingLine(lc["name"], start, end, classes, direction, severity))
+            direction = lc.get("direction") or "any"
+            # `severity` may be present-but-null (FenceLine.severity is Optional in the
+            # backend schema), so `.get(key, default)` is not enough here.
+            severity = EventSeverity[(lc.get("severity") or "critical").upper()]
+            line = _CrossingLine(lc["name"], start, end, classes, direction, severity)
+            carried = previous.get(self._line_key(line.name, start, end))
+            if carried is not None:
+                line._last_side = carried
+            new_lines.append(line)
         self._lines = new_lines
+
+    @staticmethod
+    def _line_key(name: str, start, end) -> tuple:
+        return (name, tuple(float(v) for v in start), tuple(float(v) for v in end))
+
+    def config_signature(self) -> tuple:
+        """Stable identity of the active line set — used to skip no-op config updates."""
+        return tuple(self._line_key(l.name, l.start, l.end) for l in self._lines)
 
     def update(self, detections: List[Detection]) -> List[SurveillanceEvent]:
         """Check all detections against all lines. Returns any crossing events."""

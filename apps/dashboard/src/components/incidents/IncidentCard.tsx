@@ -42,7 +42,8 @@ export const IncidentCard: React.FC<IncidentCardProps> = ({ incident, onSelect }
 
   const displayCode = getDisplayCode(incident);
   const displayTitle = incident.title || incident.description || `Track #${incident.track_id} Alert`;
-  const eventCount = incident.incident_events?.length
+  const eventCount = (incident as any).event_count
+    || incident.incident_events?.length
     || incident.triggering_events?.length
     || 0;
 

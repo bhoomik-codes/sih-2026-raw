@@ -45,6 +45,10 @@ class RiskScorer:
         if any(e.severity == EventSeverity.CRITICAL for e in events):
             return max(total_score, 100), EventSeverity.CRITICAL
 
+        # If any event is high severity (e.g. Restricted Zone breach), ensure high score
+        if any(e.severity == EventSeverity.HIGH for e in events):
+            total_score = max(total_score, 60)
+
         if total_score >= 80:
             severity = EventSeverity.CRITICAL
         elif total_score >= 50:

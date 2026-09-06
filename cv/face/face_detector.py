@@ -48,9 +48,15 @@ class FaceDetector:
         self._min_size = min_face_size
         self._classifier: Optional[cv2.CascadeClassifier] = None
         self._loaded = False
+        self._load_attempted = False
 
     def load(self) -> None:
         """Initialize OpenCV face detection model."""
+        self._load_attempted = True
+        if not hasattr(cv2, "CascadeClassifier"):
+            logger.debug("cv2.CascadeClassifier is not available in current OpenCV build.")
+            self._loaded = False
+            return
         try:
             cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
             self._classifier = cv2.CascadeClassifier(cascade_path)
@@ -74,10 +80,10 @@ class FaceDetector:
         Returns:
             List of FaceDetection objects.
         """
-        if not self._loaded:
+        if not self._load_attempted:
             self.load()
 
-        if self._classifier is None or frame is None or frame.size == 0:
+        if not self._loaded or self._classifier is None or frame is None or frame.size == 0:
             return []
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame

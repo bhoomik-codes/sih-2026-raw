@@ -61,10 +61,18 @@ event_engine:
     - - 50
       - 700
     severity: high
+face_recognition:
+  # Also used by the runtime zone/tripwire poller in apps/edge/processor.py.
+  # Must match the port uvicorn serves apps.backend.main:app on (.env BACKEND_PORT).
+  backend_url: http://127.0.0.1:8000
+  enabled: true
 incidents:
   cooldown_s: 3.0
   enabled: true
-  escalation_threshold: 40
+  # A single ZONE_ENTRY scores 30 (see intelligence/risk/scorer.py). Keeping the
+  # threshold at 30 means one virtual-fence entry escalates to an incident, which
+  # is what drives ACTIVE_ALERTS on the dashboard.
+  escalation_threshold: 30
 output:
   display: false
   metrics_print_every_n: 20
@@ -78,5 +86,5 @@ tracker:
   track_buffer: 30
   type: bytetrack
 transmitter:
-  backend_ws_url: ws://127.0.0.1:8001/ws
+  backend_ws_url: ws://127.0.0.1:8000/ws
   enabled: true

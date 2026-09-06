@@ -22,6 +22,9 @@ class EventType(Enum):
     # Direction
     WRONG_DIRECTION = auto()
 
+    # Face Detection
+    FACE_DETECTED = auto()
+
     # Phase 5: ANPR
     VEHICLE_ANPR = auto()
 

@@ -39,6 +39,13 @@ class Incident:
     timestamp: float = field(default_factory=time.time)
     camera_name: str = ""
     description: str = ""
+    incident_type: str = "SECURITY_INCIDENT"
+    rule_name: str = ""
+    line_id: str = ""
+    zone_id: str = ""
+    direction: str = ""
+    event_count: int = 1
+    condition_key: str = ""
 
     @property
     def summary(self) -> str:

@@ -14,7 +14,7 @@ import time
 from collections import defaultdict
 from typing import Dict, List
 
-from intelligence.events.base import SurveillanceEvent
+from intelligence.events.base import EventType, SurveillanceEvent
 from intelligence.incidents.base import Incident
 from intelligence.risk.scorer import RiskScorer
 
@@ -47,6 +47,17 @@ class IncidentGenerator:
         self._last_incident_time: Dict[int, float] = {}
         # track_id -> timestamp last active
         self._last_seen: Dict[int, float] = {}
+        # condition_key -> timestamp of last incident for this condition
+        self._last_condition_time: Dict[str, float] = {}
+
+    @staticmethod
+    def _condition_key(ev: SurveillanceEvent) -> str:
+        ev_type = ev.event_type.name if hasattr(ev.event_type, "name") else str(ev.event_type)
+        rule = getattr(ev, "rule_name", "")
+        details = getattr(ev, "details", {}) or {}
+        target = details.get("line") or details.get("zone") or ""
+        direction = details.get("direction") or ""
+        return f"{ev.track_id}|{rule}|{ev_type}|{target}|{direction}"
 
     def update(self, events: List[SurveillanceEvent]) -> List[Incident]:
         """
@@ -59,10 +70,13 @@ class IncidentGenerator:
 
         # 1. Update buffer with new events
         updated_tracks = set()
+        new_conditions_by_track: Dict[int, List[str]] = defaultdict(list)
         for ev in events:
             self._event_buffer[ev.track_id].append(ev)
             self._last_seen[ev.track_id] = now
             updated_tracks.add(ev.track_id)
+            c_key = self._condition_key(ev)
+            new_conditions_by_track[ev.track_id].append(c_key)
 
         incidents: List[Incident] = []
 
@@ -76,16 +90,62 @@ class IncidentGenerator:
                 last_score = self._last_score.get(tid, 0)
                 last_time = self._last_incident_time.get(tid, 0.0)
 
-                # Only generate if the score went up, or cooldown expired
-                if score > last_score or (now - last_time) > self._cooldown_s:
-                    # Create the incident
+                # Check if this update brings a genuinely new security condition
+                # (e.g. crossing a different line, entering a zone, crossing opposite direction)
+                new_evs = [
+                    ev for ev in events
+                    if ev.track_id == tid and ev.event_type != getattr(EventType, "ZONE_EXIT", None)
+                ]
+                has_new_condition = bool(new_evs) and any(
+                    (now - self._last_condition_time.get(self._condition_key(e), 0.0)) > self._cooldown_s
+                    for e in new_evs
+                )
+
+                # Generate incident if:
+                # 1) A genuinely new condition occurred, OR
+                # 2) The cumulative score escalated, OR
+                if (
+                    (last_score == 0 and score >= self._escalation_threshold)
+                    or has_new_condition
+                    or (now - last_time) > self._cooldown_s
+                ):
+                    latest_ev = track_events[-1]
+                    ev_type = (
+                        latest_ev.event_type.name
+                        if hasattr(latest_ev.event_type, "name")
+                        else str(latest_ev.event_type)
+                    )
+                    rule_name = getattr(latest_ev, "rule_name", "")
+                    details = getattr(latest_ev, "details", {}) or {}
+                    line_id = str(details.get("line", ""))
+                    zone_id = str(details.get("zone", ""))
+                    direction = str(details.get("direction", ""))
+
+                    if ev_type == "LINE_CROSSING":
+                        summary_text = f"Line Crossing: Track #{tid} crossed {line_id or rule_name} ({direction or 'any'})"
+                    elif ev_type == "ZONE_ENTRY":
+                        summary_text = f"Zone Intrusion: Track #{tid} entered {zone_id or rule_name}"
+                    elif ev_type == "FACE_IDENTIFIED_INTRUDER":
+                        summary_text = f"Intruder Identified: Track #{tid} ({details.get('name', 'Unknown')})"
+                    elif ev_type == "LOITERING":
+                        summary_text = f"Loitering Alert: Track #{tid} in {zone_id or rule_name}"
+                    else:
+                        summary_text = f"{ev_type}: Track #{tid} on {rule_name}"
+
                     inc = Incident(
                         track_id=tid,
                         risk_score=score,
                         severity=severity,
-                        triggering_events=list(track_events),  # copy of current events
-                        camera_name=track_events[-1].camera_name,
-                        description=f"Risk Score {score} reached. Events: {len(track_events)}",
+                        triggering_events=list(track_events),
+                        camera_name=latest_ev.camera_name,
+                        description=summary_text,
+                        incident_type=ev_type,
+                        rule_name=rule_name,
+                        line_id=line_id,
+                        zone_id=zone_id,
+                        direction=direction,
+                        event_count=len(track_events),
+                        condition_key=self._condition_key(latest_ev),
                     )
 
                     incidents.append(inc)
@@ -93,6 +153,8 @@ class IncidentGenerator:
                     # Update state
                     self._last_score[tid] = score
                     self._last_incident_time[tid] = now
+                    for e in new_evs:
+                        self._last_condition_time[self._condition_key(e)] = now
 
                     logger.warning("INCIDENT GENERATED: %s", inc)
 
@@ -108,3 +170,11 @@ class IncidentGenerator:
             self._last_score.pop(tid, None)
             self._last_incident_time.pop(tid, None)
             self._last_seen.pop(tid, None)
+
+        # Cleanup condition timestamps for stale tracks
+        stale_conditions = [
+            ck for ck in list(self._last_condition_time.keys())
+            if any(ck.startswith(f"{tid}|") for tid in stale)
+        ]
+        for ck in stale_conditions:
+            self._last_condition_time.pop(ck, None)

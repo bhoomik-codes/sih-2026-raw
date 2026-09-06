@@ -37,11 +37,19 @@ export function useEvents() {
     });
   }, []);
 
+  /** Remove all events belonging to a deleted camera */
+  const purgeByCamera = useCallback((cameraId: string) => {
+    setEvents((prev) =>
+      prev.filter((e) => e.camera_id !== cameraId && (e as any).camera_name !== cameraId)
+    );
+  }, []);
+
   return {
     events,
     isLoading,
     error,
     refresh: fetchEvents,
     handleNewEvent,
+    purgeByCamera,
   };
 }

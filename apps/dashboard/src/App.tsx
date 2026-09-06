@@ -44,6 +44,7 @@ export const App: React.FC = () => {
     refresh: refreshIncidents,
     handleNewIncident,
     acknowledge,
+    purgeByCamera: purgeIncidentsByCamera,
   } = useIncidents();
 
   const {
@@ -52,6 +53,7 @@ export const App: React.FC = () => {
     error: eventsError,
     refresh: refreshEvents,
     handleNewEvent,
+    purgeByCamera: purgeEventsByCamera,
   } = useEvents();
 
   const {
@@ -78,11 +80,22 @@ export const App: React.FC = () => {
     [handleNewIncident, pushIncidentToast]
   );
 
+  // Handler for real-time camera deletion — purge stale data immediately
+  const handleCameraDeleted = useCallback(
+    (cameraId: string) => {
+      purgeEventsByCamera(cameraId);
+      purgeIncidentsByCamera(cameraId);
+      refreshCameras();
+    },
+    [purgeEventsByCamera, purgeIncidentsByCamera, refreshCameras]
+  );
+
   // Real WebSocket Hook
   const { isConnected: isWsConnected } = useWebSocket({
     onEvent: handleNewEvent,
     onIncident: handleNewIncidentWithToast,
     onMetrics: handleNewMetrics,
+    onCameraDeleted: handleCameraDeleted,
   });
 
 

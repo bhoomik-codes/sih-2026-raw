@@ -143,6 +143,23 @@ _MEMORY_CAP = 200
 # Face registry: {face_id -> FaceRecord}
 _face_registry: Dict[str, FaceRecord] = {}
 
+# Alert & Deduplication Telemetry
+_alert_metrics: Dict[str, int] = {
+    "events_generated": 0,
+    "events_deduplicated": 0,
+    "incidents_created": 0,
+    "incidents_updated": 0,
+    "incidents_suppressed": 0,
+    "websocket_events_sent": 0,
+}
+
+# Incident deduplication cache (condition_key -> last_timestamp)
+_incident_dedup_cache: Dict[str, float] = {}
+_DEDUP_COOLDOWN_S = 30.0  # fallback window
+
+# Deleted camera tombstones — prevents re-registration via heartbeats
+_deleted_camera_ids: set = set()
+
 
 # Mount static video directory if exists
 VIDEOS_DIR = Path("data/videos")
@@ -281,10 +298,50 @@ async def create_camera(payload: CameraCreatePayload):
 async def delete_camera(camera_id: str):
     if camera_id not in cameras:
         raise HTTPException(status_code=404, detail="Camera not found")
+
+    # 1. Stop the edge processor subprocess
     if camera_id in processes:
-        processes[camera_id].terminate()
+        p = processes[camera_id]
+        try:
+            p.terminate()
+            p.wait(timeout=2.0)
+        except Exception:
+            try:
+                p.kill()
+            except Exception:
+                pass
         del processes[camera_id]
+
+    # 2. Purge all in-memory events for this camera
+    _in_memory_events[:] = [
+        e for e in _in_memory_events
+        if e.get("camera_id") != camera_id and e.get("camera_name") != camera_id
+    ]
+
+    # 3. Purge all in-memory incidents for this camera
+    _in_memory_incidents[:] = [
+        i for i in _in_memory_incidents
+        if i.get("camera_id") != camera_id and i.get("camera_name") != camera_id
+    ]
+
+    # 4. Clear the deduplication cache for this camera
+    stale_dedup_keys = [k for k in _incident_dedup_cache if k.startswith(f"{camera_id}|")]
+    for k in stale_dedup_keys:
+        del _incident_dedup_cache[k]
+
+    # 5. Add to tombstone set to prevent re-registration via heartbeats
+    _deleted_camera_ids.add(camera_id)
+
+    # 6. Remove the camera entry
     del cameras[camera_id]
+
+    # 7. Broadcast camera_deleted so all WS clients purge stale UI state
+    await broadcast_ws_message({
+        "type": "camera_deleted",
+        "camera_id": camera_id,
+        "timestamp": time.time(),
+    })
+
     return {"success": True}
 
 
@@ -431,8 +488,17 @@ async def start_camera(camera_id: str):
     assigned_port = next_stream_port
     next_stream_port += 1
 
+    # Locate virtualenv python if available
+    python_exe = sys.executable
+    project_venv_py = Path(__file__).resolve().parent.parent.parent / ".venv" / "bin" / "python"
+    venv_py = Path(sys.prefix) / "bin" / "python"
+    if project_venv_py.exists():
+        python_exe = str(project_venv_py)
+    elif venv_py.exists():
+        python_exe = str(venv_py)
+
     cmd = [
-        sys.executable,
+        python_exe,
         "-m",
         "apps.edge.main",
         "--source",
@@ -441,10 +507,18 @@ async def start_camera(camera_id: str):
         camera_id,
         "--stream-port",
         str(assigned_port),
+        "--backend-url",
+        "http://127.0.0.1:8000",
     ]
 
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    if project_venv_py.exists():
+        env["PATH"] = f"{project_venv_py.parent}:{env.get('PATH', '')}"
+        env["VIRTUAL_ENV"] = str(project_venv_py.parent.parent)
+
     try:
-        proc = subprocess.Popen(cmd)
+        proc = subprocess.Popen(cmd, env=env)
         processes[camera_id] = proc
         cam.status = "ONLINE"
         cam.stream_url = f"http://127.0.0.1:{assigned_port}/stream"
@@ -463,7 +537,15 @@ async def stop_camera(camera_id: str):
 
     cam = cameras[camera_id]
     if camera_id in processes:
-        processes[camera_id].terminate()
+        p = processes[camera_id]
+        try:
+            p.terminate()
+            p.wait(timeout=2.0)
+        except Exception:
+            try:
+                p.kill()
+            except Exception:
+                pass
         del processes[camera_id]
 
     cam.status = "OFFLINE"
@@ -593,6 +675,56 @@ async def acknowledge_incident(incident_id: str):
     raise HTTPException(status_code=404, detail="Incident not found")
 
 
+@app.post("/api/incidents/{incident_id}/resolve")
+async def resolve_incident(incident_id: str):
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    for inc in _in_memory_incidents:
+        if _incident_key(inc) == incident_id:
+            inc["status"] = "RESOLVED"
+            inc["resolved_at"] = now
+            await broadcast_ws_message({
+                "type": "incident",
+                "data": inc,
+            })
+            return inc
+    if db.db_enabled():
+        try:
+            res = (
+                db.get_db()
+                .table("incidents")
+                .select("*")
+                .eq("id", incident_id)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                record = dict(res.data[0])
+                record["status"] = "RESOLVED"
+                record["resolved_at"] = now
+                db.get_db().table("incidents").upsert(record).execute()
+                await broadcast_ws_message({
+                    "type": "incident",
+                    "data": record,
+                })
+                return record
+        except Exception as e:
+            print(f"[Supabase DB] resolve_incident error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    raise HTTPException(status_code=404, detail="Incident not found")
+
+
+@app.get("/api/debug/alert-metrics")
+async def get_alert_metrics():
+    return dict(_alert_metrics)
+
+
+@app.post("/api/debug/alert-metrics/reset")
+async def reset_alert_metrics():
+    for k in _alert_metrics:
+        _alert_metrics[k] = 0
+    return dict(_alert_metrics)
+
+
 @app.get("/api/events")
 async def get_events():
     if db.db_enabled():
@@ -625,6 +757,359 @@ async def broadcast_ws_message(payload: dict, sender: Optional[WebSocket] = None
     for dc in dead_connections:
         if dc in active_connections:
             active_connections.remove(dc)
+
+
+async def process_edge_message(msg: Dict[str, Any], sender: Optional[WebSocket] = None) -> Dict[str, Any]:
+    """Process an edge message (event, incident, metrics, heartbeat) from WS or HTTP."""
+    msg_type = msg.get("type")
+    node_id = msg.get("node_id", "UNKNOWN")
+    data = msg.get("data", {})
+    if not isinstance(data, dict):
+        data = {}
+
+    if msg_type == "edge_heartbeat":
+        cam_id = data.get("camera_id", node_id)
+        # Don't re-register a deleted camera
+        if cam_id in _deleted_camera_ids:
+            return {"status": "rejected", "reason": "camera_deleted", "camera_id": cam_id}
+        advertised_stream = data.get("stream_url")
+        if cam_id not in cameras:
+            cameras[cam_id] = Camera(
+                camera_id=cam_id,
+                name=cam_id,
+                source_url=data.get("source_url", "data/videos/border_crossing_test.mp4"),
+                source_type=data.get("source_type", "file"),
+                status=data.get("status", "ONLINE"),
+                stream_url=advertised_stream or "http://127.0.0.1:8081/stream",
+                inference_enabled=True,
+            )
+        else:
+            cameras[cam_id].status = data.get("status", "ONLINE")
+            if advertised_stream:
+                cameras[cam_id].stream_url = advertised_stream
+        await broadcast_ws_message(
+            {
+                "type": "camera_status",
+                "camera_id": cam_id,
+                "status": data.get("status", "ONLINE"),
+                "fps": data.get("fps", 0.0),
+                "stream_url": cameras[cam_id].stream_url,
+                "timestamp": time.time(),
+            },
+            sender=sender,
+        )
+        return {"status": "ok", "type": "heartbeat"}
+
+    elif msg_type == "edge_event":
+        event_payload = dict(data)
+        event_payload.setdefault("event_id", f"EVT-{uuid.uuid4().hex[:8].upper()}")
+        event_payload.setdefault("id", event_payload["event_id"])
+        event_payload.setdefault("camera_id", event_payload.get("camera_name", node_id))
+
+        # Reject events from deleted cameras
+        evt_cam = event_payload.get("camera_id", node_id)
+        if evt_cam in _deleted_camera_ids or (evt_cam not in cameras and evt_cam != "UNKNOWN"):
+            return {"status": "rejected", "reason": "camera_deleted", "camera_id": evt_cam}
+
+        _remember(_in_memory_events, event_payload)
+        _alert_metrics["events_generated"] += 1
+        _alert_metrics["websocket_events_sent"] += 1
+        await broadcast_ws_message(
+            {
+                "type": "event",
+                "data": event_payload,
+            },
+            sender=sender,
+        )
+
+        if db.db_enabled():
+            try:
+                import datetime
+
+                cam_name = data.get("camera_name", node_id)
+                ts_val = data.get("timestamp", time.time())
+                iso_ts = datetime.datetime.fromtimestamp(
+                    ts_val, tz=datetime.timezone.utc
+                ).isoformat()
+
+                try:
+                    db.get_db().table("cameras").upsert(
+                        {
+                            "id": cam_name,
+                            "camera_code": cam_name,
+                            "name": cam_name,
+                            "status": "ONLINE",
+                            "source_type": "file",
+                            "source_url": "data/videos/border_patrol.mp4",
+                        }
+                    ).execute()
+                except Exception:
+                    pass
+
+                db.get_db().table("events").insert(
+                    {
+                        "id": f"evt_{uuid.uuid4().hex[:16]}",
+                        "event_code": f"EVT-{uuid.uuid4().hex[:8].upper()}",
+                        "event_type": data.get("event_type", "SURVEILLANCE_EVENT"),
+                        "severity": data.get("severity", "LOW").upper(),
+                        "track_id": str(data.get("track_id", 0)),
+                        "camera_id": cam_name,
+                        "capture_ts": iso_ts,
+                        "event_ts": iso_ts,
+                        "confidence": float(data.get("confidence", 1.0)),
+                        "metadata": data.get("details", {}),
+                    }
+                ).execute()
+            except Exception as db_err:
+                print(f"[Supabase DB] save_event error: {db_err}")
+        return {"status": "ok", "type": "event", "event_id": event_payload.get("event_id")}
+
+    elif msg_type == "edge_incident":
+        incident_payload = dict(data)
+        incident_payload.setdefault("status", "OPEN")
+        incident_payload.setdefault(
+            "incident_id", incident_payload.get("id", f"INC-{uuid.uuid4().hex[:8].upper()}")
+        )
+        incident_payload.setdefault("id", incident_payload["incident_id"])
+        incident_payload.setdefault("camera_id", incident_payload.get("camera_name", node_id))
+
+        # Reject incidents from deleted cameras
+        inc_cam = incident_payload.get("camera_id", node_id)
+        if inc_cam in _deleted_camera_ids or (inc_cam not in cameras and inc_cam != "UNKNOWN"):
+            return {"status": "rejected", "reason": "camera_deleted", "camera_id": inc_cam}
+
+        # --- STATE-AWARE INCIDENT LIFECYCLE & DEDUPLICATION ---
+        cam_id = str(incident_payload.get("camera_id", node_id))
+        track_id = str(incident_payload.get("track_id", ""))
+        rule_id = str(incident_payload.get("rule_name", incident_payload.get("rule_id", "")))
+        event_type = str(incident_payload.get("incident_type", incident_payload.get("event_type", "")))
+        target_id = str(incident_payload.get("line_id", incident_payload.get("zone_id", "")))
+        direction = str(incident_payload.get("direction", ""))
+
+        condition_key = (
+            incident_payload.get("condition_key")
+            or f"{cam_id}|{track_id}|{rule_id}|{event_type}|{target_id}|{direction}"
+        )
+        incident_payload["condition_key"] = condition_key
+
+        # Check whether an equivalent incident is currently ACTIVE
+        active_match = None
+        for inc in _in_memory_incidents:
+            if inc.get("camera_id") != cam_id:
+                continue
+            inc_status = str(inc.get("status", "OPEN")).upper()
+            if inc_status not in ["OPEN", "ACKNOWLEDGED"]:
+                continue
+            if inc.get("condition_key") == condition_key:
+                active_match = inc
+                break
+
+        now_ts = time.time()
+        if active_match:
+            # Equivalent incident is already ACTIVE: update existing incident in place
+            active_match["timestamp"] = incident_payload.get("timestamp", now_ts)
+            active_match["event_count"] = active_match.get("event_count", 1) + 1
+            new_score = incident_payload.get("risk_score", 0)
+            if new_score > active_match.get("risk_score", 0):
+                active_match["risk_score"] = new_score
+                if "severity" in incident_payload:
+                    active_match["severity"] = incident_payload["severity"]
+
+            if "triggering_events" in incident_payload:
+                existing_evs = active_match.setdefault("triggering_events", [])
+                existing_evs.extend(incident_payload["triggering_events"])
+                if len(existing_evs) > 20:
+                    active_match["triggering_events"] = existing_evs[-20:]
+
+            if incident_payload.get("summary"):
+                active_match["summary"] = incident_payload["summary"]
+            if incident_payload.get("description"):
+                active_match["description"] = incident_payload["description"]
+
+            _alert_metrics["incidents_updated"] += 1
+            _alert_metrics["websocket_events_sent"] += 1
+
+            await broadcast_ws_message(
+                {
+                    "type": "incident",
+                    "data": active_match,
+                },
+                sender=sender,
+            )
+            return {
+                "status": "updated",
+                "type": "incident",
+                "incident_id": active_match.get("incident_id", active_match.get("id")),
+                "condition_key": condition_key,
+            }
+
+        # Genuinely new condition or previous incident resolved -> create NEW incident
+        incident_payload["event_count"] = int(incident_payload.get("event_count", 1))
+        _alert_metrics["incidents_created"] += 1
+        _alert_metrics["websocket_events_sent"] += 1
+
+        # --- BLOCKCHAIN ANCHORING ---
+        severity = str(incident_payload.get("severity", "LOW")).upper()
+        if severity in ["HIGH", "CRITICAL"]:
+            try:
+                tx_hash, ev_hash = blockchain.anchor.anchor_evidence(incident_payload)
+                incident_payload["blockchain_tx_hash"] = tx_hash
+                incident_payload["evidence_hash"] = ev_hash
+            except Exception as e:
+                print(f"[Blockchain] Failed to anchor incident: {e}")
+
+        _remember(_in_memory_incidents, incident_payload)
+        await broadcast_ws_message(
+            {
+                "type": "incident",
+                "data": incident_payload,
+            },
+            sender=sender,
+        )
+
+        if db.db_enabled():
+            try:
+                import datetime
+
+                cam_name = data.get("camera_name", node_id)
+                ts_val = data.get("timestamp", time.time())
+                iso_ts = datetime.datetime.fromtimestamp(
+                    ts_val, tz=datetime.timezone.utc
+                ).isoformat()
+
+                try:
+                    db.get_db().table("cameras").upsert(
+                        {
+                            "id": cam_name,
+                            "camera_code": cam_name,
+                            "name": cam_name,
+                            "status": "ONLINE",
+                            "source_type": "file",
+                            "source_url": "data/videos/border_patrol.mp4",
+                        }
+                    ).execute()
+                except Exception:
+                    pass
+
+                desc = data.get("summary", "")
+                if incident_payload.get("blockchain_tx_hash"):
+                    desc += f"\n\n[Blockchain Anchor] Verified TxHash: {incident_payload['blockchain_tx_hash']}"
+
+                db.get_db().table("incidents").insert(
+                    {
+                        "id": f"inc_{uuid.uuid4().hex[:16]}",
+                        "incident_code": data.get(
+                            "incident_id", f"INC-{uuid.uuid4().hex[:8].upper()}"
+                        ),
+                        "incident_type": data.get("incident_type", "BORDER_SECURITY_ALERT"),
+                        "severity": data.get("severity", "MEDIUM").upper(),
+                        "risk_score": float(data.get("risk_score", 0.0)),
+                        "title": data.get("summary", "Border Security Alert"),
+                        "description": desc,
+                        "status": "OPEN",
+                        "camera_id": cam_name,
+                        "created_at": iso_ts,
+                    }
+                ).execute()
+            except Exception as db_err:
+                print(f"[Supabase DB] save_incident error: {db_err}")
+        return {"status": "ok", "type": "incident", "incident_id": incident_payload.get("incident_id")}
+
+    elif msg_type == "edge_metrics":
+        global _latest_metrics
+        _latest_metrics = _normalize_metrics(data)
+        await broadcast_ws_message(
+            {
+                "type": "metrics",
+                "data": _latest_metrics,
+            },
+            sender=sender,
+        )
+
+        if db.db_enabled():
+            try:
+                import datetime
+                ts_val = data.get("timestamp", time.time())
+                iso_ts = datetime.datetime.fromtimestamp(
+                    ts_val, tz=datetime.timezone.utc
+                ).isoformat()
+                
+                try:
+                    db.get_db().table("nodes").upsert(
+                        {
+                            "id": node_id,
+                            "node_code": node_id,
+                            "name": f"Edge Node {node_id}",
+                            "node_type": "edge",
+                            "status": "ONLINE",
+                            "last_heartbeat_at": iso_ts
+                        }
+                    ).execute()
+                except Exception:
+                    pass
+                
+                db.get_db().table("system_metrics").insert(
+                    {
+                        "id": f"met_{uuid.uuid4().hex[:16]}",
+                        "node_id": node_id,
+                        "timestamp": iso_ts,
+                        "cpu_percent": float(data.get("cpu_percent", 0.0) or 0.0),
+                        "ram_percent": float(data.get("ram_percent", 0.0) or 0.0),
+                        "ram_used_mb": float(data.get("ram_used_mb", 0.0) or 0.0),
+                        "gpu_utilization": float(data.get("gpu_utilization", 0.0) or 0.0),
+                        "gpu_memory_used_mb": float(data.get("gpu_memory_used_mb", 0.0) or 0.0),
+                        "gpu_temperature_c": float(data.get("gpu_temperature_c", 0.0) or 0.0),
+                        "inference_fps": float(data.get("inference_fps", 0.0) or 0.0),
+                        "active_cameras": int(data.get("active_cameras", 0) or 0),
+                    }
+                ).execute()
+            except Exception as db_err:
+                print(f"[Supabase DB] save_metrics error: {db_err}")
+        return {"status": "ok", "type": "metrics"}
+
+    return {"status": "ignored", "type": msg_type}
+
+
+@app.post("/api/edge/ingest")
+async def ingest_edge_payload(payload: Dict[str, Any]):
+    """HTTP ingest endpoint for edge telemetry, events, and incidents."""
+    return await process_edge_message(payload)
+
+
+@app.post("/api/edge/event")
+async def ingest_edge_event(payload: Dict[str, Any]):
+    return await process_edge_message({
+        "type": "edge_event",
+        "data": payload,
+        "node_id": payload.get("camera_name", "EDGE-NODE-01"),
+    })
+
+
+@app.post("/api/edge/incident")
+async def ingest_edge_incident(payload: Dict[str, Any]):
+    return await process_edge_message({
+        "type": "edge_incident",
+        "data": payload,
+        "node_id": payload.get("camera_name", "EDGE-NODE-01"),
+    })
+
+
+@app.post("/api/edge/metrics")
+async def ingest_edge_metrics(payload: Dict[str, Any]):
+    return await process_edge_message({
+        "type": "edge_metrics",
+        "data": payload,
+        "node_id": payload.get("node_id", "EDGE-NODE-01"),
+    })
+
+
+@app.post("/api/edge/heartbeat")
+async def ingest_edge_heartbeat(payload: Dict[str, Any]):
+    return await process_edge_message({
+        "type": "edge_heartbeat",
+        "data": payload,
+        "node_id": payload.get("camera_id", "EDGE-NODE-01"),
+    })
 
 
 @app.websocket("/ws")
@@ -668,226 +1153,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            # Receive live telemetry or events from Edge nodes
             raw_data = await websocket.receive_text()
             try:
                 msg = json.loads(raw_data)
             except json.JSONDecodeError:
                 continue
 
-            msg_type = msg.get("type")
-            node_id = msg.get("node_id", "UNKNOWN")
-            data = msg.get("data", {})
-
-            if msg_type == "edge_heartbeat":
-                cam_id = data.get("camera_id", node_id)
-                advertised_stream = data.get("stream_url")
-                if cam_id not in cameras:
-                    cameras[cam_id] = Camera(
-                        camera_id=cam_id,
-                        name=cam_id,
-                        source_url=data.get("source_url", "data/videos/border_crossing_test.mp4"),
-                        source_type=data.get("source_type", "file"),
-                        status=data.get("status", "ONLINE"),
-                        stream_url=advertised_stream or "http://127.0.0.1:8081/stream",
-                        inference_enabled=True,
-                    )
-                else:
-                    cameras[cam_id].status = data.get("status", "ONLINE")
-                    if advertised_stream:
-                        cameras[cam_id].stream_url = advertised_stream
-                await broadcast_ws_message(
-                    {
-                        "type": "camera_status",
-                        "camera_id": cam_id,
-                        "status": data.get("status", "ONLINE"),
-                        "fps": data.get("fps", 0.0),
-                        "stream_url": cameras[cam_id].stream_url,
-                        "timestamp": time.time(),
-                    },
-                    sender=websocket,
-                )
-
-            elif msg_type == "edge_event":
-                _remember(_in_memory_events, dict(data))
-                await broadcast_ws_message(
-                    {
-                        "type": "event",
-                        "data": data,
-                    },
-                    sender=websocket,
-                )
-
-                # Persist to database if available
-                if db.db_enabled():
-                    try:
-                        import datetime
-
-                        cam_name = data.get("camera_name", node_id)
-                        ts_val = data.get("timestamp", time.time())
-                        iso_ts = datetime.datetime.fromtimestamp(
-                            ts_val, tz=datetime.timezone.utc
-                        ).isoformat()
-
-                        # Ensure camera exists to satisfy foreign key constraints
-                        try:
-                            db.get_db().table("cameras").upsert(
-                                {
-                                    "id": cam_name,
-                                    "camera_code": cam_name,
-                                    "name": cam_name,
-                                    "status": "ONLINE",
-                                    "source_type": "file",
-                                    "source_url": "data/videos/border_patrol.mp4",
-                                }
-                            ).execute()
-                        except Exception:
-                            pass
-
-                        db.get_db().table("events").insert(
-                            {
-                                "id": f"evt_{uuid.uuid4().hex[:16]}",
-                                "event_code": f"EVT-{uuid.uuid4().hex[:8].upper()}",
-                                "event_type": data.get("event_type", "SURVEILLANCE_EVENT"),
-                                "severity": data.get("severity", "LOW").upper(),
-                                "track_id": str(data.get("track_id", 0)),
-                                "camera_id": cam_name,
-                                "capture_ts": iso_ts,
-                                "event_ts": iso_ts,
-                                "confidence": float(data.get("confidence", 1.0)),
-                                "metadata": data.get("details", {}),
-                            }
-                        ).execute()
-                    except Exception as db_err:
-                        print(f"[Supabase DB] save_event error: {db_err}")
-
-            elif msg_type == "edge_incident":
-                incident_payload = dict(data)
-                incident_payload.setdefault("status", "OPEN")
-                incident_payload.setdefault(
-                    "incident_id", incident_payload.get("id", f"INC-{uuid.uuid4().hex[:8].upper()}")
-                )
-                incident_payload.setdefault("camera_id", incident_payload.get("camera_name", node_id))
-                
-                # --- BLOCKCHAIN ANCHORING ---
-                severity = str(incident_payload.get("severity", "LOW")).upper()
-                if severity in ["HIGH", "CRITICAL"]:
-                    try:
-                        tx_hash, ev_hash = blockchain.anchor.anchor_evidence(incident_payload)
-                        incident_payload["blockchain_tx_hash"] = tx_hash
-                        incident_payload["evidence_hash"] = ev_hash
-                    except Exception as e:
-                        print(f"[Blockchain] Failed to anchor incident: {e}")
-                
-                _remember(_in_memory_incidents, incident_payload)
-                await broadcast_ws_message(
-                    {
-                        "type": "incident",
-                        "data": incident_payload,
-                    },
-                    sender=websocket,
-                )
-
-                if db.db_enabled():
-                    try:
-                        import datetime
-
-                        cam_name = data.get("camera_name", node_id)
-                        ts_val = data.get("timestamp", time.time())
-                        iso_ts = datetime.datetime.fromtimestamp(
-                            ts_val, tz=datetime.timezone.utc
-                        ).isoformat()
-
-                        # Ensure camera exists to satisfy foreign key constraints
-                        try:
-                            db.get_db().table("cameras").upsert(
-                                {
-                                    "id": cam_name,
-                                    "camera_code": cam_name,
-                                    "name": cam_name,
-                                    "status": "ONLINE",
-                                    "source_type": "file",
-                                    "source_url": "data/videos/border_patrol.mp4",
-                                }
-                            ).execute()
-                        except Exception:
-                            pass
-
-                        desc = data.get("summary", "")
-                        if incident_payload.get("blockchain_tx_hash"):
-                            desc += f"\n\n[Blockchain Anchor] Verified TxHash: {incident_payload['blockchain_tx_hash']}"
-
-                        db.get_db().table("incidents").insert(
-                            {
-                                "id": f"inc_{uuid.uuid4().hex[:16]}",
-                                "incident_code": data.get(
-                                    "incident_id", f"INC-{uuid.uuid4().hex[:8].upper()}"
-                                ),
-                                "incident_type": data.get("incident_type", "BORDER_SECURITY_ALERT"),
-                                "severity": data.get("severity", "MEDIUM").upper(),
-                                "risk_score": float(data.get("risk_score", 0.0)),
-                                "title": data.get("summary", "Border Security Alert"),
-                                "description": desc,
-                                "status": "OPEN",
-                                "camera_id": cam_name,
-                                "created_at": iso_ts,
-                            }
-                        ).execute()
-                    except Exception as db_err:
-                        print(f"[Supabase DB] save_incident error: {db_err}")
-
-            elif msg_type == "edge_metrics":
-                global _latest_metrics
-                _latest_metrics = _normalize_metrics(data)
-                await broadcast_ws_message(
-                    {
-                        "type": "metrics",
-                        "data": _latest_metrics,
-                    },
-                    sender=websocket,
-                )
-
-                if db.db_enabled():
-                    try:
-                        import datetime
-                        ts_val = data.get("timestamp", time.time())
-                        iso_ts = datetime.datetime.fromtimestamp(
-                            ts_val, tz=datetime.timezone.utc
-                        ).isoformat()
-                        
-                        # Ensure node exists to satisfy foreign key constraints
-                        try:
-                            db.get_db().table("nodes").upsert(
-                                {
-                                    "id": node_id,
-                                    "node_code": node_id,
-                                    "name": f"Edge Node {node_id}",
-                                    "node_type": "edge",
-                                    "status": "ONLINE",
-                                    "last_heartbeat_at": iso_ts
-                                }
-                            ).execute()
-                        except Exception:
-                            pass
-                        
-                        # Insert system_metrics
-                        db.get_db().table("system_metrics").insert(
-                            {
-                                "id": f"met_{uuid.uuid4().hex[:16]}",
-                                "node_id": node_id,
-                                "timestamp": iso_ts,
-                                "cpu_percent": float(data.get("cpu_percent", 0.0) or 0.0),
-                                "ram_percent": float(data.get("ram_percent", 0.0) or 0.0),
-                                "ram_used_mb": float(data.get("ram_used_mb", 0.0) or 0.0),
-                                "gpu_utilization": float(data.get("gpu_utilization", 0.0) or 0.0),
-                                "gpu_memory_used_mb": float(data.get("gpu_memory_used_mb", 0.0) or 0.0),
-                                "gpu_temperature_c": float(data.get("gpu_temperature_c", 0.0) or 0.0),
-                                "inference_fps": float(data.get("inference_fps", 0.0) or 0.0),
-                                "active_cameras": int(data.get("active_cameras", 0) or 0),
-                            }
-                        ).execute()
-                    except Exception as db_err:
-                        print(f"[Supabase DB] save_metrics error: {db_err}")
+            await process_edge_message(msg, sender=websocket)
 
     except WebSocketDisconnect:
         if websocket in active_connections:

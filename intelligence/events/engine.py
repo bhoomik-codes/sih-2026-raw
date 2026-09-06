@@ -66,6 +66,9 @@ class EventEngine:
         self._crossing: LineCrossingEngine = LineCrossingEngine(lines_cfg, camera_name)
         self._loitering: LoiteringEngine = LoiteringEngine(loiter_cfg, camera_name)
         self._night: NightActivityEngine = NightActivityEngine(night_cfg, camera_name)
+        
+        from intelligence.events.face_detection import FaceDetectionEngine
+        self._face_det: FaceDetectionEngine = FaceDetectionEngine(camera_name)
 
         logger.info(
             "EventEngine initialised  camera=%s  zones=%d  lines=%d  loitering=%d  night=%s",
@@ -94,6 +97,7 @@ class EventEngine:
         events.extend(self._crossing.update(detections))
         events.extend(self._loitering.update(detections))
         events.extend(self._night.update(detections))
+        events.extend(self._face_det.update(detections))
 
         for ev in events:
             logger.info("EVENT  %s", ev)
@@ -106,6 +110,7 @@ class EventEngine:
         self._crossing.cleanup_stale_tracks(active_track_ids)
         self._loitering.cleanup_stale_tracks(active_track_ids)
         self._night.cleanup_stale_tracks(active_track_ids)
+        self._face_det.cleanup_stale_tracks(active_track_ids)
 
     def update_zones(self, zones_config: List[dict]) -> None:
         """Dynamically update polygon zones at runtime."""

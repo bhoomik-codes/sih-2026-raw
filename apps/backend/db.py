@@ -214,5 +214,8 @@ def get_db():
 
 
 def db_enabled() -> bool:
-    """Return True if a database connection URL is configured."""
+    """Return True if a database connection URL is configured and enabled."""
+    enabled_str = os.getenv("DATABASE_ENABLED", "true").lower().strip()
+    if enabled_str in ("false", "0", "no", "off"):
+        return False
     return bool(DATABASE_URL or (SUPABASE_URL and SUPABASE_KEY))

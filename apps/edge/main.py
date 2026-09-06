@@ -81,6 +81,11 @@ def main() -> None:
         help="Port to serve the MJPEG stream on. If set, no-display is implied.",
     )
     parser.add_argument(
+        "--backend-url",
+        default=None,
+        help="Base URL of IBVAP backend (e.g. http://127.0.0.1:8000).",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -96,6 +101,13 @@ def main() -> None:
     logger.info("Config loaded: %s", args.config)
 
     # Apply CLI overrides
+    if args.backend_url:
+        b_url = args.backend_url.rstrip("/")
+        ws_url = b_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
+        config.setdefault("transmitter", {})["backend_ws_url"] = ws_url
+        config.setdefault("face_recognition", {})["backend_url"] = b_url
+        logger.info("Backend URL overridden from CLI: %s (WS: %s)", b_url, ws_url)
+
     if args.source:
         args.source = args.source.strip('\'"\\')
         config.setdefault("camera", {})["source"] = args.source
@@ -116,6 +128,10 @@ def main() -> None:
     max_queue_size = int(cam_cfg.get("max_queue_size", 2))
     reconnect_delay = float(cam_cfg.get("reconnect_delay_s", 3.0))
     camera_name = args.camera_id if args.camera_id else cam_cfg.get("name", "CAM-01")
+    # Write the resolved name back into the config: EdgeProcessor builds its EventEngine
+    # from config["camera"]["name"], so without this every event would be stamped with
+    # the YAML default instead of the camera id the Command Center spawned us with.
+    config.setdefault("camera", {})["name"] = camera_name
 
     # Resolve detector config
     det_cfg = config.get("detector", {})

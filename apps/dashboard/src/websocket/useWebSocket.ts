@@ -9,6 +9,7 @@ interface UseWebSocketOptions {
   onEvent?: (event: SurveillanceEvent) => void;
   onIncident?: (incident: Incident) => void;
   onMetrics?: (metrics: SystemMetrics) => void;
+  onCameraDeleted?: (cameraId: string) => void;
 }
 
 export function useWebSocket(options: UseWebSocketOptions = {}) {
@@ -45,7 +46,12 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
           const type = message.type || message.event_type || 'unknown';
           const payload = message.data || message;
 
-          if (type === 'event' || message.event_type) {
+          if (type === 'camera_deleted') {
+            const deletedCameraId = message.camera_id || payload.camera_id;
+            if (deletedCameraId) {
+              optionsRef.current.onCameraDeleted?.(deletedCameraId);
+            }
+          } else if (type === 'event' || message.event_type) {
             const ev: SurveillanceEvent = payload;
             const eventKey = ev.event_id || `${ev.track_id}-${ev.timestamp}-${ev.event_type}`;
             if (!seenEventIdsRef.current.has(eventKey)) {

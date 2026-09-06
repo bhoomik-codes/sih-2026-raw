@@ -3,7 +3,7 @@ echo ===========================================
 echo   IBVAP: ALL-IN-ONE LAPTOP DEPLOYMENT
 echo ===========================================
 echo Starting Command Center Backend...
-start "IBVAP Backend" cmd /k ".\.venv\Scripts\activate && uvicorn apps.backend.main:app --host 0.0.0.0 --port 8001 --reload"
+start "IBVAP Backend" cmd /k ".\.venv\Scripts\activate && uvicorn apps.backend.main:app --host 0.0.0.0 --port 8000 --reload"
 
 echo Starting Command Center Dashboard...
 start "IBVAP Dashboard" cmd /k "cd apps\dashboard && npm run dev -- --host"

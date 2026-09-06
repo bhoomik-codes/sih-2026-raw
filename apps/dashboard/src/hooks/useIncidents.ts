@@ -70,6 +70,20 @@ export function useIncidents() {
     }
   }, [selectedIncident]);
 
+  /** Remove all incidents belonging to a deleted camera */
+  const purgeByCamera = useCallback((cameraId: string) => {
+    setIncidents((prev) =>
+      prev.filter((i) => (i as any).camera_id !== cameraId && (i as any).camera_name !== cameraId)
+    );
+    // Clear selection if it belonged to the deleted camera
+    setSelectedIncident((prev) => {
+      if (prev && ((prev as any).camera_id === cameraId || (prev as any).camera_name === cameraId)) {
+        return null;
+      }
+      return prev;
+    });
+  }, []);
+
   const activeIncidents = incidents.filter((i) => {
     const status = i.status?.toUpperCase();
     return status !== 'RESOLVED' && status !== 'FALSE_POSITIVE' && status !== 'DISMISSED' && status !== 'FALSE_ALARM';
@@ -86,5 +100,6 @@ export function useIncidents() {
     handleNewIncident,
     acknowledge,
     isAcknowledging,
+    purgeByCamera,
   };
 }

@@ -49,6 +49,9 @@ class EdgeTransmitter:
         self._thread: Optional[threading.Thread] = None
         self._ws: Optional[Any] = None
         self._is_connected = False
+        # Diagnostics: a misconfigured backend URL used to fail completely silently.
+        self._consecutive_failures = 0
+        self._dropped = 0
 
     @property
     def is_connected(self) -> bool:
@@ -150,12 +153,43 @@ class EdgeTransmitter:
                 self._queue.put_nowait(item)
             except Exception:
                 pass
+            self._dropped += 1
+            if self._dropped % 100 == 1:
+                logger.warning(
+                    "[EDGE_TX] queue full — dropped %d payload(s) so far (backend unreachable?)",
+                    self._dropped,
+                )
+
+    def _http_post(self, payload: Dict[str, Any]) -> bool:
+        """Fallback HTTP POST transmitter using standard library urllib."""
+        try:
+            import urllib.request
+            http_url = self._url.replace("ws://", "http://").replace("wss://", "https://")
+            if http_url.endswith("/ws"):
+                http_url = http_url[:-3]
+            ingest_url = f"{http_url}/api/edge/ingest"
+            data_bytes = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                ingest_url,
+                data=data_bytes,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                return resp.status in (200, 201, 204)
+        except Exception as e:
+            logger.debug("HTTP fallback ingest failed: %s", e)
+            return False
 
     def _worker_loop(self) -> None:
         retry_delay = 1.0
         while not self._stop_event.is_set():
             if not HAS_WEBSOCKET_CLIENT:
-                time.sleep(2.0)
+                try:
+                    msg = self._queue.get(timeout=0.2)
+                    self._http_post(msg)
+                except queue.Empty:
+                    pass
                 continue
 
             try:
@@ -166,7 +200,8 @@ class EdgeTransmitter:
                 self._ws = ws
                 self._is_connected = True
                 retry_delay = 1.0
-                logger.info("Connected to Command Center WebSocket at %s", self._url)
+                self._consecutive_failures = 0
+                logger.info("[EDGE_TX] connected to Command Center WebSocket at %s", self._url)
 
                 # Send initial handshake
                 handshake = {
@@ -186,9 +221,10 @@ class EdgeTransmitter:
                     try:
                         ws.send(json.dumps(msg))
                     except Exception as send_err:
-                        logger.warning("WebSocket send failed: %s. Reconnecting...", send_err)
-                        # Re-enqueue item
-                        self._enqueue(msg)
+                        logger.warning("WebSocket send failed: %s. Falling back to HTTP...", send_err)
+                        # Attempt HTTP fallback immediately so event is not delayed
+                        if not self._http_post(msg):
+                            self._enqueue(msg)
                         break
 
             except Exception as conn_err:
@@ -198,8 +234,20 @@ class EdgeTransmitter:
                     conn_err,
                     retry_delay,
                 )
+                # While waiting to reconnect WS, drain urgent events via HTTP fallback
+                drained = 0
+                while not self._queue.empty() and drained < 20 and not self._stop_event.is_set():
+                    try:
+                        m = self._queue.get_nowait()
+                        if not self._http_post(m):
+                            self._enqueue(m)
+                            break
+                        drained += 1
+                    except Exception:
+                        break
+
                 self._stop_event.wait(retry_delay)
-                retry_delay = min(15.0, retry_delay * 1.5)
+                retry_delay = min(10.0, retry_delay * 1.5)
             finally:
                 self._is_connected = False
                 if self._ws:
